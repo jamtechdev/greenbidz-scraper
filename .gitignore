@@ -1,0 +1,32 @@
+# ── Dependencies ──────────────────────────────────────────────
+node_modules/
+**/node_modules/
+
+# ── Build output ──────────────────────────────────────────────
+dist/
+dist-ssr/
+**/dist/
+.vite/
+
+# ── Env & secrets (NEVER commit) ──────────────────────────────
+.env
+.env.*
+!.env.example
+**/.env
+
+# ── Runtime / generated ───────────────────────────────────────
+Backend/downloads/
+Backend/logs/
+*.log
+*.tmp
+**/payload.tmp.json
+
+# ── Editor / OS ───────────────────────────────────────────────
+.DS_Store
+*.local
+.idea/
+.vscode/
+
+# ── Claude Code local config ──────────────────────────────────
+.claude/
+**/.claude/

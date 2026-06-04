@@ -1,0 +1,27 @@
+flowchart TD
+    A([Trigger: scheduler tick or manual-run]) --> B{For each LISTING_URL}
+    B --> C{API profile<br/>claims this listing?}
+    C -- yes --> D["API crawl:<br/>page-walk batch/fetch"]
+    C -- no --> E["DOM crawl:<br/>render page + click Next"]
+    D --> F[Discovered products]
+    E --> F
+    F --> G[("Record each in products as a STUB<br/>new rows: scraped = FALSE")]
+    G --> H{ONLY_NEW_PRODUCTS?}
+    H -- "true (default)" --> I["Select rows where<br/>scraped = FALSE<br/>new + previously-failed"]
+    H -- false --> J[Select ALL discovered]
+    I --> K{For each<br/>selected product}
+    J --> K
+    K -- next --> L{Matching<br/>profile found?}
+    L -- no --> M[("Log to pending_mappings<br/>for human review")]
+    L -- yes --> N["Extract data<br/>API record OR DOM selectors<br/>retry with backoff"]
+    N --> O{Scrape<br/>succeeded?}
+    O -- yes --> P[("Upsert into products")]
+    P --> Q["Download images<br/>if profile.downloadImages"]
+    Q --> R[("products.scraped = TRUE")]
+    O -- no --> S[("products.last_error set<br/>scraped stays FALSE<br/>retried next cycle")]
+    R --> K
+    S --> K
+    M --> K
+    K -- all done --> T[("Write crawl_history row<br/>found / new / failed / duration")]
+    T --> B
+    B -- all listings done --> U([Sleep until next interval])

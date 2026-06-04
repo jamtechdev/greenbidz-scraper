@@ -1,0 +1,78 @@
+{
+  "profileId": "profile_wwwlabassetscom",
+  "profileName": "labassets",
+  "domain": "www.labassets.com",
+  "urlPattern": "https://www\\.labassets\\.com/listings/\\d+[^/]*",
+  "source": "dom",
+  "downloadImages": true,
+  "scrapeMode": "auto",
+  "scrapeLimit": 20,
+  "listingUrls": [
+    "https://www.labassets.com/listings/"
+  ],
+  "pagination": {
+    "productLinkSelector": "a[href*=\"/listings/\"]",
+    "productUrlPattern": "/listings/\\d+[^/]*",
+    "nextSelector": "a[rel=\"next\"], div.pagination.justify-content-center > ul.d-flex > li.page-item:nth-of-type(4) > a.page-link, a[aria-label*=\"next\" i], button[aria-label*=\"next\" i], li.page-item:last-child > a.page-link, .pagination .next:not(.disabled) a, li.next:not(.disabled) a",
+    "waitForSelector": "a[href*=\"/listings/\"]"
+  },
+  "fields": {
+    "title": {
+      "selector": "h1.show-info__title",
+      "type": "text",
+      "required": true,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[1]/h1[1]",
+      "sampleValue": "Fedegari Autoclave FVA2/A1, 75 litre Vertical Lab Sterilizer, with Counterpressure sterilization Opt"
+    },
+    "price": {
+      "selector": "span.primary-price",
+      "type": "text",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[1]/div[1]/div[1]/h4[1]/div[1]/span[1]",
+      "sampleValue": "£1,999.00"
+    },
+    "description": {
+      "selector": "div.show-info.position-relative > div.show-info__description:nth-of-type(3) > div.show-info__section-text.ql-editor:nth-of-type(1) > p",
+      "type": "html",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[3]/div[1]/p[1]",
+      "sampleValue": "The Fedegari Autoclave FVA/A1 vertical lab sterilizer, Model FVA2/A1, is equipped with a stainless steel chamber and lid with automatic independent operation and control. The steriliser has been speci"
+    },
+    "model": {
+      "selector": "table.table-xs-fixed > tbody > tr:nth-of-type(2) > td.text-xs-ellipsis.notranslate:nth-of-type(2)",
+      "type": "text",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[4]/table[1]/tbody[1]/tr[2]/td[2]",
+      "sampleValue": "FVA2/A1 75ltr"
+    },
+    "serial": {
+      "selector": "table.table-xs-fixed > tbody > tr:nth-of-type(4) > td.text-xs-ellipsis.notranslate:nth-of-type(2)",
+      "type": "text",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[4]/table[1]/tbody[1]/tr[4]/td[2]",
+      "sampleValue": "S/N NB2029AP"
+    },
+    "manufacturer": {
+      "selector": "table.table-xs-fixed > tbody > tr:nth-of-type(1) > td.text-xs-ellipsis.notranslate:nth-of-type(2)",
+      "type": "text",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[4]/table[1]/tbody[1]/tr[1]/td[2]",
+      "sampleValue": "Fedegari"
+    },
+    "condition": {
+      "selector": "table.table-xs-fixed > tbody > tr:nth-of-type(3) > td.text-xs-ellipsis:nth-of-type(2)",
+      "type": "text",
+      "required": false,
+      "xpath": "/html[1]/body[1]/div[2]/div[2]/div[1]/div[1]/div[1]/div[2]/div[1]/div[2]/div[1]/div[4]/table[1]/tbody[1]/tr[3]/td[2]",
+      "sampleValue": "Used"
+    }
+  },
+  "selectors": {
+    "images": "img.gallery-image",
+    "waitForSelector": "h1.show-info__title",
+    "timeout": 15000
+  },
+  "createdAt": "2026-06-04T13:01:12.108Z",
+  "updatedAt": "2026-06-04T13:01:12.113Z",
+  "usageCount": 0
+}

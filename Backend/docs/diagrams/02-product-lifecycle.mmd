@@ -1,0 +1,6 @@
+stateDiagram-v2
+    [*] --> Unscraped: discovered in listing<br/>stub row, scraped = FALSE
+    Unscraped --> Scraped: scrape succeeds<br/>row filled in, scraped = TRUE
+    Unscraped --> Unscraped: scrape fails<br/>retry next cycle
+    Scraped --> Scraped: re-scraped ONLY if<br/>ONLY_NEW_PRODUCTS = false
+    Scraped --> [*]: skipped when<br/>ONLY_NEW_PRODUCTS = true

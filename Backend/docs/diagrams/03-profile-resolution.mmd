@@ -1,0 +1,6 @@
+flowchart LR
+    U[Listing URL] --> P{Any profile with<br/>source = api<br/>matching this listing?}
+    P -- yes --> API["API mode<br/>scrapers/api-client.js<br/>no browser"]
+    P -- no --> DOM["DOM mode<br/>scrapers/listing-crawler.js<br/>Puppeteer + stealth"]
+    API --> R[Normalised product data]
+    DOM --> R

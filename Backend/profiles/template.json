@@ -1,0 +1,39 @@
+{
+  "profileId": "profile_template",
+  "profileName": "Template Profile (copy me)",
+  "urlPattern": "https://example\\.com/product/\\d+",
+  "domain": "example.com",
+  "createdAt": "1970-01-01T00:00:00Z",
+  "updatedAt": "1970-01-01T00:00:00Z",
+  "downloadImages": true,
+  "fields": {
+    "title": {
+      "selector": "h1",
+      "type": "text",
+      "required": true,
+      "fallback": ".product-title"
+    },
+    "price": {
+      "selector": ".price",
+      "type": "text",
+      "required": false,
+      "fallback": "[data-price]"
+    },
+    "description": {
+      "selector": ".description",
+      "type": "html",
+      "required": false
+    },
+    "sku": {
+      "selector": ".sku",
+      "type": "text",
+      "required": false
+    }
+  },
+  "selectors": {
+    "images": "img.product-image",
+    "waitForSelector": ".product-container",
+    "timeout": 10000
+  },
+  "usageCount": 0
+}
