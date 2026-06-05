@@ -111,8 +111,10 @@ async function goToNextPage(page, nextSelector, waitForSelector) {
     await Promise.all([
       page
         .waitForNavigation({
-          waitUntil: CONSTANTS.NAV_WAIT_UNTIL,
-          timeout: CONSTANTS.PAGE_TIMEOUT_MS,
+          waitUntil: 'domcontentloaded',
+          // Capped: SPA "next" often swaps content without a real navigation,
+          // so don't burn the full page timeout waiting for one that won't come.
+          timeout: Math.min(10000, CONSTANTS.PAGE_TIMEOUT_MS),
         })
         .catch(() => null), // SPA: navigation may not fire
       next.click(),
@@ -154,14 +156,29 @@ export async function crawlListingPage(listingUrl, options = {}) {
 
   try {
     logger.info(`🔍 Crawling: ${listingUrl}`);
-    await goto(page, listingUrl);
+    // Heavy lazy-loading listings (e.g. labassets) may never fire 'networkidle2'
+    // OR even 'domcontentloaded' within the timeout — the HTML streams slowly.
+    // So we do NOT block on the navigation lifecycle: fire it and gate on the
+    // product-link selector actually appearing. A nav timeout is non-fatal as
+    // long as content shows up.
+    let navError = null;
+    goto(page, listingUrl, { waitUntil: 'domcontentloaded' }).catch((e) => {
+      navError = e.message;
+    });
 
-    if (pagination.waitForSelector) {
-      await page
-        .waitForSelector(pagination.waitForSelector, {
-          timeout: CONSTANTS.PAGE_TIMEOUT_MS,
-        })
-        .catch(() => {});
+    const contentSelector = pagination.waitForSelector || pagination.productLinkSelector;
+    const contentAppeared = contentSelector
+      ? await page
+          .waitForSelector(contentSelector, { timeout: CONSTANTS.PAGE_TIMEOUT_MS })
+          .then(() => true)
+          .catch(() => false)
+      : true;
+
+    if (!contentAppeared) {
+      logger.warn(
+        `No content matched "${contentSelector}" on ${listingUrl} ` +
+          `${navError ? `(nav: ${navError})` : ''} — proceeding best-effort.`,
+      );
     }
     // SPA hydration settle.
     await new Promise((r) => setTimeout(r, pagination.settleMs));

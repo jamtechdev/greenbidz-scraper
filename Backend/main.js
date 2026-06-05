@@ -14,7 +14,7 @@
 import { startScheduler } from './scheduler/job-runner.js';
 import { readAllProfiles } from './utils/file-manager.js';
 import { CONSTANTS } from './config/constants.js';
-import { testConnection, closePool } from './config/database.js';
+import { testSequelize, sequelize } from './config/sequelize.js';
 import { logger } from './utils/logger.js';
 
 async function main() {
@@ -22,11 +22,11 @@ async function main() {
 
   // Fail fast if the DB is unreachable.
   try {
-    await testConnection();
+    await testSequelize();
     logger.success('Database connection OK.');
   } catch (err) {
     logger.error(`Cannot connect to database: ${err.message}`, { stack: err.stack });
-    logger.error('Run `npm run setup` and check your .env credentials.');
+    logger.error('Run `npm run db:migrate` and check your .env credentials.');
     process.exit(1);
   }
 
@@ -53,7 +53,7 @@ async function main() {
     } catch {
       /* ignore */
     }
-    await closePool().catch(() => {});
+    await sequelize.close().catch(() => {});
     process.exit(0);
   };
   process.on('SIGINT', () => shutdown('SIGINT'));

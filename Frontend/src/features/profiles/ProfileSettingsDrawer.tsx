@@ -6,7 +6,6 @@ import {
   Clock,
   CalendarClock,
   Images,
-  CheckCircle2,
   AlertCircle,
   ExternalLink,
 } from 'lucide-react';
@@ -19,6 +18,7 @@ import {
   useRunProfile,
   useUpdateProfileSettings,
 } from '@/hooks/useApi';
+import { useScrapeLock, formatRemaining } from '@/hooks/useScrapeLock';
 import type { ProfileListItem, ScrapeMode } from '@/types/api';
 import { formatDate, timeAgo, timeUntil } from '@/lib/format';
 
@@ -33,13 +33,13 @@ export function ProfileSettingsDrawer({
   const run = useRunProfile();
   const del = useDeleteProfile();
   const { data: hist } = useCrawlHistory(50);
+  const scrapeLock = useScrapeLock(profile?.fileName ?? '');
 
   const [mode, setMode] = useState<ScrapeMode>('manual');
   const [limit, setLimit] = useState('');
   const [images, setImages] = useState(false);
   const [paused, setPaused] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
-  const [runDone, setRunDone] = useState(false);
 
   // Reset the form whenever a different profile is opened.
   useEffect(() => {
@@ -49,7 +49,6 @@ export function ProfileSettingsDrawer({
     setImages(!!profile.downloadImages);
     setPaused(!!profile.paused);
     setConfirmDelete(false);
-    setRunDone(false);
     update.reset();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [profile?.fileName]);
@@ -67,7 +66,7 @@ export function ProfileSettingsDrawer({
       images !== !!profile.downloadImages ||
       paused !== !!profile.paused);
 
-  const canRun = !!profile && profile.listingUrls.length > 0;
+  const canRun = !!profile && profile.listingUrls.length > 0 && !scrapeLock.locked;
   const recent = (hist?.history ?? [])
     .filter((h) => profile?.listingUrls.includes(h.listing_url))
     .slice(0, 6);
@@ -82,12 +81,7 @@ export function ProfileSettingsDrawer({
 
   const onRun = () => {
     if (!profile) return;
-    run.mutate(profile.fileName, {
-      onSuccess: () => {
-        setRunDone(true);
-        setTimeout(() => setRunDone(false), 4000);
-      },
-    });
+    run.mutate(profile.fileName, { onSuccess: () => scrapeLock.lock() });
   };
 
   const onDelete = () => {
@@ -111,22 +105,22 @@ export function ProfileSettingsDrawer({
         >
           {update.isSuccess && !dirty ? 'Saved' : 'Save settings'}
         </Button>
-        {runDone ? (
-          <span className="inline-flex items-center gap-1 text-xs text-accent">
-            <CheckCircle2 className="h-4 w-4" /> started
-          </span>
-        ) : (
-          <Button
-            variant="secondary"
-            icon={<Play className="h-3.5 w-3.5" />}
-            onClick={onRun}
-            loading={run.isPending}
-            disabled={!canRun}
-            title={canRun ? 'Crawl this profile now' : 'No listing URLs on this profile'}
-          >
-            Scrape now
-          </Button>
-        )}
+        <Button
+          variant="secondary"
+          icon={<Play className="h-3.5 w-3.5" />}
+          onClick={onRun}
+          loading={run.isPending}
+          disabled={!canRun}
+          title={
+            scrapeLock.locked
+              ? 'Scraping in progress — try again later'
+              : profile && profile.listingUrls.length
+                ? 'Crawl this profile now'
+                : 'No listing URLs on this profile'
+          }
+        >
+          {scrapeLock.locked ? `Scraping… ${formatRemaining(scrapeLock.remainingMs)}` : 'Scrape now'}
+        </Button>
         <div className="ml-auto">
           {confirmDelete ? (
             <div className="flex items-center gap-2">

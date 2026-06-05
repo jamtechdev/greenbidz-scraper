@@ -1,0 +1,188 @@
+{
+  "marketplaces": [
+    {
+      "name": "101lab",
+      "displayName": "Lab Equipment",
+      "categories": [
+        {
+          "id": 5375,
+          "name": "Lab Infrastructure & Essentials",
+          "slug": "lab-infrastructure-essentials",
+          "subcategories": [
+            { "id": 5411, "name": "Cold Storage (-80C Freezers, LN2 Tanks)", "slug": "cold-storage-80c-freezers-ln2-tanks", "parent": 5375 },
+            { "id": 5412, "name": "Fume Hoods & Biosafety Cabinets", "slug": "fume-hoods-biosafety-cabinets", "parent": 5375 },
+            { "id": 5415, "name": "General Lab Tools (Balances, Pipettes, Stirrers)", "slug": "general-lab-tools-balances-pipettes-stirrers", "parent": 5375 },
+            { "id": 5413, "name": "Lab Furniture & Benches", "slug": "lab-furniture-benches", "parent": 5375 },
+            { "id": 5414, "name": "Water Purification Systems", "slug": "water-purification-systems", "parent": 5375 }
+          ]
+        },
+        {
+          "id": 5371,
+          "name": "Life Sciences & Biotech (Bio)",
+          "slug": "life-sciences-biotech-bio",
+          "subcategories": [
+            { "id": 5383, "name": "Bioreactors & Fermenters", "slug": "bioreactors-fermenters", "parent": 5371 },
+            { "id": 5384, "name": "Cell Culture & Analysis", "slug": "cell-culture-analysis", "parent": 5371 },
+            { "id": 5385, "name": "Centrifuges (Floor, Tabletop, Ultra)", "slug": "centrifuges-floor-tabletop-ultra", "parent": 5371 },
+            { "id": 5386, "name": "Genomics & PCR", "slug": "genomics-pcr", "parent": 5371 },
+            { "id": 5387, "name": "Incubators & Shakers", "slug": "incubators-shakers", "parent": 5371 },
+            { "id": 5388, "name": "Microscopy & Imaging Systems", "slug": "microscopy-imaging-systems", "parent": 5371 },
+            { "id": 5390, "name": "Sterilization & Autoclaves", "slug": null, "parent": 5371 },
+            { "id": 5389, "name": "Protein Purification (FPLC)", "slug": "fplc", "parent": 5371 }
+          ]
+        },
+        {
+          "id": 5372,
+          "name": "Pharmaceutical & Analytical (Pharma)",
+          "slug": "pharmaceutical-analytical-pharma",
+          "subcategories": [
+            { "id": 5391, "name": "Chromatography (HPLC, GC, TLC)", "slug": "chromatography-hplc-gc-tlc", "parent": 5372 },
+            { "id": 5394, "name": "Dissolution & Tablet Testing", "slug": "dissolution-tablet-testing", "parent": 5372 },
+            { "id": 5392, "name": "Mass Spectrometry (LC-MS, GC-MS)", "slug": "mass-spectrometry-lc-ms-gc-ms", "parent": 5372 },
+            { "id": 5396, "name": "Pharmaceutical Processing (Mixers, Granulators)", "slug": "pharmaceutical-processing-mixers-granulators", "parent": 5372 },
+            { "id": 5397, "name": "Sample Preparation (Evaporators, Freeze Dryers)", "slug": "sample-preparation-evaporators-freeze-dryers", "parent": 5372 },
+            { "id": 5393, "name": "Spectroscopy (UV-Vis, FTIR, NMR)", "slug": "spectroscopy-uv-vis-ftir-nmr", "parent": 5372 },
+            { "id": 5398, "name": "Thermal Analysis (DSC, TGA)", "slug": "thermal-analysis-dsc-tga", "parent": 5372 },
+            { "id": 5395, "name": "Liquid Handling & Lab Automation", "slug": null, "parent": 5372 }
+          ]
+        },
+        {
+          "id": 5373,
+          "name": "Test & Measurement (T&M)",
+          "slug": "test-measurement-tm",
+          "subcategories": [
+            { "id": 5399, "name": "Calibration & Standards", "slug": "calibration-standards", "parent": 5373 },
+            { "id": 5400, "name": "Electronic Test (Oscilloscopes, Multimeters)", "slug": "electronic-test-oscilloscopes-multimeters", "parent": 5373 },
+            { "id": 5401, "name": "Environmental Chambers (Temp/Humidity)", "slug": "environmental-chambers-temp-humidity", "parent": 5373 },
+            { "id": 5402, "name": "Materials Testing (UTM, Hardness)", "slug": "materials-testing-utm-hardness", "parent": 5373 },
+            { "id": 5403, "name": "Metrology & Inspection (CMM, Vision Systems)", "slug": "metrology-inspection-cmm-vision-systems", "parent": 5373 },
+            { "id": 5404, "name": "Physical Property Testing (Viscometers, Rheometers)", "slug": "physical-property-testing-viscometers-rheometers", "parent": 5373 },
+            { "id": 5405, "name": "Pressure, Flow & Vacuum Measurement", "slug": "pressure-flow-vacuum-measurement", "parent": 5373 },
+            { "id": 5406, "name": "Signal Generators & Analyzers", "slug": "signal-generators-analyzers", "parent": 5373 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "101machine",
+      "displayName": "Machinery",
+      "categories": [
+        { "id": 5300, "name": "Boring & Drilling Machines", "slug": "boring-drilling-machines", "subcategories": [] },
+        { "id": 5301, "name": "Grinding & Finishing", "slug": "grinding-finishing", "subcategories": [] },
+        { "id": 5305, "name": "Laser & Plasma Cutting", "slug": "laser-plasma-cutting", "subcategories": [] },
+        { "id": 5299, "name": "Lathes", "slug": "lathes", "subcategories": [] },
+        { "id": 5296, "name": "Machining Centers", "slug": "machining-centers", "subcategories": [] },
+        { "id": 5339, "name": "Material Handling", "slug": "material-handling", "subcategories": [] },
+        { "id": 5316, "name": "Milling Machines", "slug": "milling-machines", "subcategories": [] },
+        { "id": 5303, "name": "Press Brakes & Shears", "slug": "press-brakes-shears", "subcategories": [] },
+        { "id": 5304, "name": "Punching & Forging", "slug": "punching-forging", "subcategories": [] },
+        { "id": 5302, "name": "Sawing Machines", "slug": "sawing-machines", "subcategories": [] },
+        { "id": 5315, "name": "Scrap", "slug": "scrap", "subcategories": [] },
+        { "id": 5306, "name": "Welding Equipment", "slug": "welding-equipment", "subcategories": [] }
+      ]
+    },
+    {
+      "name": "101it",
+      "displayName": "IT Equipment",
+      "categories": [
+        {
+          "id": 5421,
+          "name": "Laptops & Desktops",
+          "slug": "laptops-desktops",
+          "subcategories": [
+            { "id": 5432, "name": "Dell", "slug": "dell", "parent": 5421 },
+            { "id": 5434, "name": "HP", "slug": "hp", "parent": 5421 },
+            { "id": 5433, "name": "Lenovo", "slug": "lenovo", "parent": 5421 },
+            { "id": 5431, "name": "MacBooks", "slug": "macbooks", "parent": 5421 }
+          ]
+        },
+        {
+          "id": 5419,
+          "name": "Smartphones",
+          "slug": "smartphones",
+          "subcategories": [
+            { "id": 5422, "name": "Apple", "slug": "apple", "parent": 5419 },
+            { "id": 5424, "name": "Google", "slug": "google", "parent": 5419 },
+            { "id": 5425, "name": "Huawei", "slug": "huawei", "parent": 5419 },
+            { "id": 5427, "name": "Motorola", "slug": "motorola", "parent": 5419 },
+            { "id": 5426, "name": "One Plus", "slug": "one-plus", "parent": 5419 },
+            { "id": 5423, "name": "Samsung", "slug": "samsung", "parent": 5419 }
+          ]
+        },
+        {
+          "id": 5420,
+          "name": "Tablets",
+          "slug": "tablets",
+          "subcategories": [
+            { "id": 5428, "name": "iPad", "slug": "ipad", "parent": 5420 },
+            { "id": 5430, "name": "Microsoft Surface", "slug": "microsoft-surface", "parent": 5420 },
+            { "id": 5429, "name": "Samsung Tab", "slug": "samsung-tab", "parent": 5420 }
+          ]
+        }
+      ]
+    },
+    {
+      "name": "101recycle",
+      "displayName": "Recycle Lab Equipment",
+      "categories": [
+        {
+          "id": 5375,
+          "name": "Lab Infrastructure & Essentials",
+          "slug": "lab-infrastructure-essentials",
+          "subcategories": [
+            { "id": 5411, "name": "Cold Storage (-80C Freezers, LN2 Tanks)", "slug": "cold-storage-80c-freezers-ln2-tanks", "parent": 5375 },
+            { "id": 5412, "name": "Fume Hoods & Biosafety Cabinets", "slug": "fume-hoods-biosafety-cabinets", "parent": 5375 },
+            { "id": 5415, "name": "General Lab Tools (Balances, Pipettes, Stirrers)", "slug": "general-lab-tools-balances-pipettes-stirrers", "parent": 5375 },
+            { "id": 5413, "name": "Lab Furniture & Benches", "slug": "lab-furniture-benches", "parent": 5375 },
+            { "id": 5414, "name": "Water Purification Systems", "slug": "water-purification-systems", "parent": 5375 }
+          ]
+        },
+        {
+          "id": 5371,
+          "name": "Life Sciences & Biotech (Bio)",
+          "slug": "life-sciences-biotech-bio",
+          "subcategories": [
+            { "id": 5383, "name": "Bioreactors & Fermenters", "slug": "bioreactors-fermenters", "parent": 5371 },
+            { "id": 5384, "name": "Cell Culture & Analysis", "slug": "cell-culture-analysis", "parent": 5371 },
+            { "id": 5385, "name": "Centrifuges (Floor, Tabletop, Ultra)", "slug": "centrifuges-floor-tabletop-ultra", "parent": 5371 },
+            { "id": 5386, "name": "Genomics & PCR", "slug": "genomics-pcr", "parent": 5371 },
+            { "id": 5387, "name": "Incubators & Shakers", "slug": "incubators-shakers", "parent": 5371 },
+            { "id": 5388, "name": "Microscopy & Imaging Systems", "slug": "microscopy-imaging-systems", "parent": 5371 },
+            { "id": 5390, "name": "Sterilization & Autoclaves", "slug": null, "parent": 5371 },
+            { "id": 5389, "name": "Protein Purification (FPLC)", "slug": "fplc", "parent": 5371 }
+          ]
+        },
+        {
+          "id": 5372,
+          "name": "Pharmaceutical & Analytical (Pharma)",
+          "slug": "pharmaceutical-analytical-pharma",
+          "subcategories": [
+            { "id": 5391, "name": "Chromatography (HPLC, GC, TLC)", "slug": "chromatography-hplc-gc-tlc", "parent": 5372 },
+            { "id": 5394, "name": "Dissolution & Tablet Testing", "slug": "dissolution-tablet-testing", "parent": 5372 },
+            { "id": 5392, "name": "Mass Spectrometry (LC-MS, GC-MS)", "slug": "mass-spectrometry-lc-ms-gc-ms", "parent": 5372 },
+            { "id": 5396, "name": "Pharmaceutical Processing (Mixers, Granulators)", "slug": "pharmaceutical-processing-mixers-granulators", "parent": 5372 },
+            { "id": 5397, "name": "Sample Preparation (Evaporators, Freeze Dryers)", "slug": "sample-preparation-evaporators-freeze-dryers", "parent": 5372 },
+            { "id": 5393, "name": "Spectroscopy (UV-Vis, FTIR, NMR)", "slug": "spectroscopy-uv-vis-ftir-nmr", "parent": 5372 },
+            { "id": 5398, "name": "Thermal Analysis (DSC, TGA)", "slug": "thermal-analysis-dsc-tga", "parent": 5372 },
+            { "id": 5395, "name": "Liquid Handling & Lab Automation", "slug": null, "parent": 5372 }
+          ]
+        },
+        {
+          "id": 5373,
+          "name": "Test & Measurement (T&M)",
+          "slug": "test-measurement-tm",
+          "subcategories": [
+            { "id": 5399, "name": "Calibration & Standards", "slug": "calibration-standards", "parent": 5373 },
+            { "id": 5400, "name": "Electronic Test (Oscilloscopes, Multimeters)", "slug": "electronic-test-oscilloscopes-multimeters", "parent": 5373 },
+            { "id": 5401, "name": "Environmental Chambers (Temp/Humidity)", "slug": "environmental-chambers-temp-humidity", "parent": 5373 },
+            { "id": 5402, "name": "Materials Testing (UTM, Hardness)", "slug": "materials-testing-utm-hardness", "parent": 5373 },
+            { "id": 5403, "name": "Metrology & Inspection (CMM, Vision Systems)", "slug": "metrology-inspection-cmm-vision-systems", "parent": 5373 },
+            { "id": 5404, "name": "Physical Property Testing (Viscometers, Rheometers)", "slug": "physical-property-testing-viscometers-rheometers", "parent": 5373 },
+            { "id": 5405, "name": "Pressure, Flow & Vacuum Measurement", "slug": "pressure-flow-vacuum-measurement", "parent": 5373 },
+            { "id": 5406, "name": "Signal Generators & Analyzers", "slug": "signal-generators-analyzers", "parent": 5373 }
+          ]
+        }
+      ]
+    }
+  ]
+}

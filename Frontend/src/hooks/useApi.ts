@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { api, type ProductsQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
-import type { ProfileSettings } from '@/types/api';
+import type { ProfileSettings, SyncBatchInput } from '@/types/api';
 
 export function useDashboardState() {
   return useQuery({
@@ -80,6 +80,27 @@ export function useDeleteProfile() {
     mutationFn: (fileName: string) => api.deleteProfile(fileName),
     onSuccess: () => {
       qc.invalidateQueries({ queryKey: queryKeys.profiles });
+    },
+  });
+}
+
+// ── Sync to main site ─────────────────────────────────────────────────────────
+
+export function useSyncMeta() {
+  return useQuery({ queryKey: ['sync-meta'], queryFn: api.getSyncMeta, staleTime: 5 * 60 * 1000 });
+}
+
+export function usePreviewSync() {
+  return useMutation({ mutationFn: (body: SyncBatchInput) => api.previewSync(body) });
+}
+
+export function useSubmitSync() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SyncBatchInput) => api.submitSync(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: queryKeys.state });
     },
   });
 }

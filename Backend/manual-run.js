@@ -44,7 +44,7 @@ async function runOverride(url, profileFile) {
   }
   let fileName = profileFile;
   if (!fileName.endsWith('.json')) fileName += '.json';
-  if (!profileExists(fileName)) {
+  if (!(await profileExists(fileName))) {
     logger.error(`Profile not found: ${fileName} (in profiles/)`);
     process.exit(1);
   }

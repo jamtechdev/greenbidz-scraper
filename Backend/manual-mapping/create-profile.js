@@ -155,7 +155,7 @@ export async function manualMappingCreator() {
   let fileName = fileNameAnswer.fileName;
   if (!fileName.endsWith('.json')) fileName += '.json';
 
-  if (profileExists(fileName)) {
+  if (await profileExists(fileName)) {
     const { overwrite } = await prompts({
       type: 'confirm',
       name: 'overwrite',

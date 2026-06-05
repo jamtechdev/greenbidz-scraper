@@ -55,6 +55,10 @@ export interface Product {
   images_local_paths: string[];
   images_remote_urls: string[];
   last_error: string | null;
+  /** Set once the product has been synced to the main site. */
+  synced?: boolean;
+  synced_at?: string | null;
+  main_product_id?: number | null;
   // Present only on the single-product detail endpoint:
   description?: string | null;
   raw_data?: unknown;
@@ -130,6 +134,81 @@ export interface ProfileSettingsResponse {
 export interface DeleteProfileResponse {
   ok: boolean;
   fileName: string;
+}
+
+// ── Sync to main GreenBidz site ──────────────────────────────────────────────
+
+export interface SyncSubcategory {
+  id: number;
+  name: string;
+  slug: string | null;
+  parent: number;
+}
+export interface SyncCategory {
+  id: number;
+  name: string;
+  slug: string | null;
+  subcategories: SyncSubcategory[];
+}
+export interface SyncMarketplace {
+  name: string;
+  displayName: string;
+  siteType: string;
+  categories: SyncCategory[];
+}
+export interface SyncSeller {
+  id: number;
+  username: string;
+  email: string;
+  displayName: string;
+}
+export interface SyncMeta {
+  marketplaces: SyncMarketplace[];
+  sellers: SyncSeller[];
+  defaults: Record<string, unknown>;
+  enums: Record<string, string[]>;
+  requiredFields: string[];
+}
+export interface SyncPreviewItem {
+  productId: number;
+  mapped: Record<string, unknown>;
+  images: string[];
+  category: {
+    term_id: number;
+    name: string;
+    isSub: boolean;
+    parent?: number | null;
+    parentName?: string;
+    autoMatched: boolean;
+  } | null;
+  categoryMatched: boolean;
+  autoMatched: boolean;
+  missing: string[];
+  syncable: boolean;
+  error?: string;
+}
+export interface SyncPreviewResponse {
+  marketplace: string;
+  siteType: string;
+  seller: SyncSeller;
+  country: string;
+  total: number;
+  syncable: number;
+  blocked: number;
+  results: SyncPreviewItem[];
+}
+export interface SyncBatchInput {
+  productIds: number[];
+  marketplace: string;
+  sellerId: number;
+  country: string;
+  overrides?: Record<string, Record<string, unknown>>;
+}
+export interface SyncSubmitResponse {
+  ok: boolean;
+  siteType: string;
+  count: number;
+  mainApiResponse: unknown;
 }
 
 export interface RunProfileResponse {

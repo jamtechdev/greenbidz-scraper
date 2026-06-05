@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileCode2, Play, Plus, CheckCircle2, Settings2, AlertCircle, PauseCircle } from 'lucide-react';
+import { FileCode2, Play, Plus, Settings2, AlertCircle, PauseCircle } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -8,6 +8,7 @@ import { Button } from '@/components/ui/Button';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
 import { ErrorState, TableSkeleton, EmptyState } from '@/components/ui/states';
 import { useProfiles, useRunProfile } from '@/hooks/useApi';
+import { useScrapeLock, formatRemaining } from '@/hooks/useScrapeLock';
 import type { ProfileListItem } from '@/types/api';
 import { timeAgo, timeUntil } from '@/lib/format';
 import { ProfileSettingsDrawer } from './ProfileSettingsDrawer';
@@ -68,17 +69,12 @@ export function ProfilesPage() {
 
 function ProfileRow({ profile: p, onOpen }: { profile: ProfileListItem; onOpen: () => void }) {
   const run = useRunProfile();
-  const [done, setDone] = useState(false);
-  const canRun = p.listingUrls.length > 0;
+  const { locked, remainingMs, lock } = useScrapeLock(p.fileName);
+  const canRun = p.listingUrls.length > 0 && !locked;
 
   const onRun = (e: React.MouseEvent) => {
     e.stopPropagation();
-    run.mutate(p.fileName, {
-      onSuccess: () => {
-        setDone(true);
-        setTimeout(() => setDone(false), 4000);
-      },
-    });
+    run.mutate(p.fileName, { onSuccess: () => lock() });
   };
 
   return (
@@ -125,23 +121,23 @@ function ProfileRow({ profile: p, onOpen }: { profile: ProfileListItem; onOpen: 
               <AlertCircle className="h-3.5 w-3.5" /> failed
             </span>
           )}
-          {done ? (
-            <span className="flex items-center gap-1 text-xs text-accent">
-              <CheckCircle2 className="h-3.5 w-3.5" /> started
-            </span>
-          ) : (
-            <Button
-              size="sm"
-              variant="secondary"
-              icon={<Play className="h-3.5 w-3.5" />}
-              loading={run.isPending}
-              disabled={!canRun}
-              onClick={onRun}
-              title={canRun ? 'Crawl this profile now' : 'No listing URLs on this profile'}
-            >
-              Scrape new
-            </Button>
-          )}
+          <Button
+            size="sm"
+            variant="secondary"
+            icon={<Play className="h-3.5 w-3.5" />}
+            loading={run.isPending}
+            disabled={!canRun}
+            onClick={onRun}
+            title={
+              locked
+                ? 'Scraping in progress — try again later'
+                : p.listingUrls.length
+                  ? 'Crawl this profile now'
+                  : 'No listing URLs on this profile'
+            }
+          >
+            {locked ? `Scraping… ${formatRemaining(remainingMs)}` : 'Scrape new'}
+          </Button>
           <Button
             size="sm"
             variant="ghost"

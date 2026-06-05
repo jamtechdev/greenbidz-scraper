@@ -5,6 +5,7 @@ import { ProductsPage } from '@/features/products/ProductsPage';
 import { CrawlsPage } from '@/features/crawls/CrawlsPage';
 import { MappingStudioPage } from '@/features/mapping-studio/MappingStudioPage';
 import { ProfilesPage } from '@/features/profiles/ProfilesPage';
+import { SyncPage } from '@/features/sync/SyncPage';
 import { PlaceholderPage } from '@/features/PlaceholderPage';
 import { RouteError } from '@/components/layout/RouteError';
 
@@ -17,6 +18,7 @@ export const router = createBrowserRouter([
       { index: true, element: <DashboardPage /> },
       { path: 'scraper/new', element: <MappingStudioPage /> },
       { path: 'products', element: <ProductsPage /> },
+      { path: 'sync', element: <SyncPage /> },
       { path: 'crawls', element: <CrawlsPage /> },
       {
         path: 'sources',

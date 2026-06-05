@@ -62,15 +62,19 @@ export async function newPage(browser) {
 }
 
 /**
- * Navigate to a URL using the configured wait strategy.
+ * Navigate to a URL. Defaults to the configured wait strategy
+ * (CONSTANTS.NAV_WAIT_UNTIL), but callers can override `waitUntil` — heavy
+ * lazy-loading SPAs (e.g. labassets) never reach 'networkidle2', so the listing
+ * crawler passes 'domcontentloaded' and gates on a content selector instead.
  * @param {import('puppeteer').Page} page
  * @param {string} url
+ * @param {{ waitUntil?: string, timeout?: number }} [opts]
  * @returns {Promise<import('puppeteer').HTTPResponse | null>}
  */
-export async function goto(page, url) {
+export async function goto(page, url, opts = {}) {
   return page.goto(url, {
-    waitUntil: CONSTANTS.NAV_WAIT_UNTIL,
-    timeout: CONSTANTS.PAGE_TIMEOUT_MS,
+    waitUntil: opts.waitUntil || CONSTANTS.NAV_WAIT_UNTIL,
+    timeout: opts.timeout || CONSTANTS.PAGE_TIMEOUT_MS,
   });
 }
 

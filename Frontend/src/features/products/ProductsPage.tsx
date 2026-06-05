@@ -1,8 +1,10 @@
-import { useMemo, useState } from 'react';
-import { Search, Package, ImageIcon } from 'lucide-react';
+import { useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Search, Package, ImageIcon, UploadCloud, ChevronLeft, ChevronRight, CheckCircle2 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
 import { ErrorState, TableSkeleton, EmptyState } from '@/components/ui/states';
 import { useProducts } from '@/hooks/useApi';
@@ -14,14 +16,27 @@ import { ProductDetailDrawer } from './ProductDetailDrawer';
 type Filter = 'all' | 'scraped' | 'unscraped';
 
 export function ProductsPage() {
+  const navigate = useNavigate();
   const [filter, setFilter] = useState<Filter>('all');
   const [search, setSearch] = useState('');
   const [selected, setSelected] = useState<Product | null>(null);
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set());
+
+  const PAGE_SIZE = 50;
+  const [page, setPage] = useState(0);
 
   const { data, isLoading, isError, error, refetch } = useProducts({
-    limit: 200,
+    limit: 500,
     scrapedOnly: filter === 'scraped',
   });
+
+  const toggleId = (id: number) =>
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
 
   const rows = useMemo(() => {
     let list = data?.products ?? [];
@@ -38,11 +53,28 @@ export function ProductsPage() {
     return list;
   }, [data, filter, search]);
 
+  // Reset to the first page whenever the filtered set changes.
+  useEffect(() => setPage(0), [filter, search]);
+
+  const pageCount = Math.max(1, Math.ceil(rows.length / PAGE_SIZE));
+  const clampedPage = Math.min(page, pageCount - 1);
+  const pageRows = rows.slice(clampedPage * PAGE_SIZE, clampedPage * PAGE_SIZE + PAGE_SIZE);
+  const selectablePageRows = pageRows.filter((p) => !p.synced);
+
   return (
     <>
       <PageHeader
         title="Products"
-        description="Every product discovered by the scraper. Click a row for full detail."
+        description="Every product discovered by the scraper. Select products to sync to the main site, or click a row for detail."
+        actions={
+          <Button
+            icon={<UploadCloud className="h-4 w-4" />}
+            disabled={selectedIds.size === 0}
+            onClick={() => navigate(`/sync?ids=${[...selectedIds].join(',')}`)}
+          >
+            Sync to main site{selectedIds.size ? ` (${selectedIds.size})` : ''}
+          </Button>
+        }
       />
 
       <Card>
@@ -71,12 +103,14 @@ export function ProductsPage() {
               </button>
             ))}
           </div>
-          <span className="text-xs text-muted">{rows.length} shown</span>
+          <span className="text-xs text-muted">
+            {rows.length} total{selectedIds.size ? ` · ${selectedIds.size} selected` : ''}
+          </span>
         </div>
 
         <CardBody className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={8} cols={5} />
+            <TableSkeleton rows={8} cols={7} />
           ) : isError ? (
             <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
           ) : !rows.length ? (
@@ -86,8 +120,28 @@ export function ProductsPage() {
               icon={<Package className="h-5 w-5" />}
             />
           ) : (
+            <>
             <Table>
               <THead>
+                <TH className="w-10">
+                  <input
+                    type="checkbox"
+                    className="h-4 w-4 cursor-pointer accent-accent"
+                    title="Select all (unsynced) on this page"
+                    checked={
+                      selectablePageRows.length > 0 &&
+                      selectablePageRows.every((p) => selectedIds.has(p.id))
+                    }
+                    onChange={(e) =>
+                      setSelectedIds((prev) => {
+                        const next = new Set(prev);
+                        if (e.target.checked) selectablePageRows.forEach((p) => next.add(p.id));
+                        else selectablePageRows.forEach((p) => next.delete(p.id));
+                        return next;
+                      })
+                    }
+                  />
+                </TH>
                 <TH className="w-12" />
                 <TH>Title</TH>
                 <TH>Price</TH>
@@ -96,8 +150,19 @@ export function ProductsPage() {
                 <TH>Last seen</TH>
               </THead>
               <TBody>
-                {rows.map((p) => (
+                {pageRows.map((p) => (
                   <TR key={p.id} onClick={() => setSelected(p)}>
+                    <TD>
+                      <input
+                        type="checkbox"
+                        className="h-4 w-4 cursor-pointer accent-accent disabled:cursor-not-allowed disabled:opacity-40"
+                        checked={selectedIds.has(p.id)}
+                        disabled={!!p.synced}
+                        title={p.synced ? 'Already synced to main site' : undefined}
+                        onClick={(e) => e.stopPropagation()}
+                        onChange={() => toggleId(p.id)}
+                      />
+                    </TD>
                     <TD>
                       <Thumb product={p} />
                     </TD>
@@ -112,19 +177,55 @@ export function ProductsPage() {
                       {p.profile_file_name || '—'}
                     </TD>
                     <TD>
-                      {p.last_error ? (
-                        <Badge tone="no">error</Badge>
-                      ) : (
-                        <Badge tone={p.scraped ? 'yes' : 'neutral'}>
-                          {p.scraped ? 'scraped' : 'pending'}
-                        </Badge>
-                      )}
+                      <div className="flex items-center gap-1.5">
+                        {p.last_error ? (
+                          <Badge tone="no">error</Badge>
+                        ) : (
+                          <Badge tone={p.scraped ? 'yes' : 'neutral'}>
+                            {p.scraped ? 'scraped' : 'pending'}
+                          </Badge>
+                        )}
+                        {p.synced && (
+                          <Badge tone="info">
+                            <CheckCircle2 className="mr-1 inline h-3 w-3" />
+                            synced
+                          </Badge>
+                        )}
+                      </div>
                     </TD>
                     <TD className="whitespace-nowrap text-xs text-muted">{timeAgo(p.last_seen_at)}</TD>
                   </TR>
                 ))}
               </TBody>
             </Table>
+            {pageCount > 1 && (
+              <div className="flex items-center justify-between border-t border-line px-4 py-3 text-xs text-muted">
+                <span>
+                  Showing {clampedPage * PAGE_SIZE + 1}–
+                  {Math.min((clampedPage + 1) * PAGE_SIZE, rows.length)} of {rows.length}
+                </span>
+                <div className="flex items-center gap-2">
+                  <button
+                    className="inline-flex items-center gap-1 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={clampedPage === 0}
+                    onClick={() => setPage((p) => Math.max(0, p - 1))}
+                  >
+                    <ChevronLeft className="h-3.5 w-3.5" /> Prev
+                  </button>
+                  <span>
+                    Page {clampedPage + 1} / {pageCount}
+                  </span>
+                  <button
+                    className="inline-flex items-center gap-1 rounded-lg border border-line bg-panel2 px-2.5 py-1.5 font-medium text-ink disabled:cursor-not-allowed disabled:opacity-40"
+                    disabled={clampedPage >= pageCount - 1}
+                    onClick={() => setPage((p) => Math.min(pageCount - 1, p + 1))}
+                  >
+                    Next <ChevronRight className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            )}
+            </>
           )}
         </CardBody>
       </Card>

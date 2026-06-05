@@ -1,10 +1,26 @@
 /**
  * @file database/queries.js
- * @description All MySQL data-access operations for Product Monitor.
- *              No SQL lives outside this module.
+ * @description All data-access operations for Product Monitor.
+ *
+ * Backed by Sequelize (see ../models). Straightforward reads use the models;
+ * the subtle MySQL upserts (ON DUPLICATE KEY … with COALESCE / counter
+ * increments) keep their exact SQL, executed over the same Sequelize
+ * connection. Return shapes (snake_case keys, parsed JSON arrays, coerced
+ * booleans) are preserved so nothing downstream changes.
  */
 
-import { query } from '../config/database.js';
+import { Op, QueryTypes, literal } from 'sequelize';
+import { sequelize, Product, CrawlHistory, PendingMapping } from '../models/index.js';
+
+/** Run raw SELECT SQL with positional `?` params, returning rows. */
+function selectSql(text, replacements = []) {
+  return sequelize.query(text, { replacements, type: QueryTypes.SELECT });
+}
+
+/** Run raw write SQL (INSERT/UPDATE) with positional `?` params. */
+function writeSql(text, replacements = []) {
+  return sequelize.query(text, { replacements });
+}
 
 /**
  * JSON arrays are stored in JSON columns. mysql2 returns JSON columns already
@@ -27,10 +43,6 @@ function asArray(value) {
 }
 
 // ── products: discovery queue (the `scraped` flag lives here now) ────────────
-//
-// There is no separate seen_products table. A product is "discovered" by
-// inserting a stub row with scraped = FALSE; a successful scrape fills the row
-// in and flips scraped = TRUE (see upsertProduct).
 
 /**
  * Check whether a product URL already exists in products.
@@ -38,11 +50,8 @@ function asArray(value) {
  * @returns {Promise<boolean>}
  */
 export async function hasSeenProduct(productUrl) {
-  const rows = await query(
-    'SELECT 1 FROM products WHERE product_url = ? LIMIT 1',
-    [productUrl],
-  );
-  return rows.length > 0;
+  const n = await Product.count({ where: { product_url: productUrl } });
+  return n > 0;
 }
 
 /**
@@ -50,52 +59,54 @@ export async function hasSeenProduct(productUrl) {
  * @returns {Promise<Set<string>>}
  */
 export async function getSeenUrls() {
-  const rows = await query('SELECT product_url FROM products');
+  const rows = await Product.findAll({ attributes: ['product_url'], raw: true });
   return new Set(rows.map((r) => r.product_url));
 }
 
 /**
- * Fetch the set of product URLs that have NOT yet been scraped
- * (products.scraped = FALSE).
+ * Fetch the set of product URLs that have NOT yet been scraped.
  * @returns {Promise<Set<string>>}
  */
 export async function getUnscrapedUrls() {
-  const rows = await query(
-    'SELECT product_url FROM products WHERE scraped = FALSE',
-  );
+  const rows = await Product.findAll({
+    where: { scraped: false },
+    attributes: ['product_url'],
+    raw: true,
+  });
   return new Set(rows.map((r) => r.product_url));
 }
 
 /**
  * Record a discovered product as a stub row (scraped = FALSE) if it does not
  * already exist. Existing rows are left untouched except for last_seen_at.
- * This is the "store the id with scraped:false" step.
- *
  * @param {string} productUrl
  * @param {string} [externalId]
  * @returns {Promise<void>}
  */
 export async function recordDiscoveredProduct(productUrl, externalId = null) {
-  await query(
+  await writeSql(
     `INSERT INTO products (external_id, product_url, raw_data, scraped)
      VALUES (?, ?, ?, FALSE)
      ON DUPLICATE KEY UPDATE
        last_seen_at = CURRENT_TIMESTAMP,
        external_id  = COALESCE(VALUES(external_id), external_id)`,
-    [externalId ?? (productUrl.split('/').filter(Boolean).pop() || productUrl), productUrl, JSON.stringify({})],
+    [
+      externalId ?? (productUrl.split('/').filter(Boolean).pop() || productUrl),
+      productUrl,
+      JSON.stringify({}),
+    ],
   );
 }
 
 /**
- * Explicitly flag a product as scraped. (upsertProduct already does this on a
- * successful scrape; this is kept for ad-hoc use.)
+ * Explicitly flag a product as scraped.
  * @param {string} productUrl
  * @returns {Promise<void>}
  */
 export async function markProductScraped(productUrl) {
-  await query(
-    'UPDATE products SET scraped = TRUE, scraped_at = CURRENT_TIMESTAMP WHERE product_url = ?',
-    [productUrl],
+  await Product.update(
+    { scraped: true, scraped_at: literal('CURRENT_TIMESTAMP') },
+    { where: { product_url: productUrl } },
   );
 }
 
@@ -103,18 +114,8 @@ export async function markProductScraped(productUrl) {
 
 /**
  * Insert or update a product row (upsert on product_url).
- *
  * @param {object} data
- * @param {string} data.externalId
- * @param {string} data.productUrl
- * @param {string} data.profileFileName
- * @param {object} data.rawData            - Arbitrary scraped payload.
- * @param {string} [data.title]
- * @param {number|null} [data.price]
- * @param {string} [data.description]
- * @param {string[]} [data.imagesLocalPaths]
- * @param {string[]} [data.imagesRemoteUrls]
- * @returns {Promise<number>} The product id (existing or newly inserted).
+ * @returns {Promise<number|null>} The product id (existing or newly inserted).
  */
 export async function upsertProduct(data) {
   const {
@@ -129,7 +130,7 @@ export async function upsertProduct(data) {
     imagesRemoteUrls = [],
   } = data;
 
-  await query(
+  await writeSql(
     `INSERT INTO products
        (external_id, product_url, profile_file_name, raw_data, title, price,
         description, images_local_paths, images_remote_urls,
@@ -163,11 +164,12 @@ export async function upsertProduct(data) {
     ],
   );
 
-  const rows = await query(
-    'SELECT id FROM products WHERE product_url = ? LIMIT 1',
-    [productUrl],
-  );
-  return rows.length ? rows[0].id : null;
+  const row = await Product.findOne({
+    where: { product_url: productUrl },
+    attributes: ['id'],
+    raw: true,
+  });
+  return row ? row.id : null;
 }
 
 /**
@@ -177,10 +179,7 @@ export async function upsertProduct(data) {
  * @returns {Promise<void>}
  */
 export async function updateProductImages(productId, localPaths) {
-  await query('UPDATE products SET images_local_paths = ? WHERE id = ?', [
-    JSON.stringify(localPaths ?? []),
-    productId,
-  ]);
+  await Product.update({ images_local_paths: localPaths ?? [] }, { where: { id: productId } });
 }
 
 /**
@@ -191,7 +190,7 @@ export async function updateProductImages(productId, localPaths) {
  * @returns {Promise<void>}
  */
 export async function recordProductError(productUrl, errorMessage, profileFileName = null) {
-  await query(
+  await writeSql(
     `INSERT INTO products
        (external_id, product_url, profile_file_name, raw_data, is_active,
         scrape_attempts, last_error)
@@ -216,12 +215,8 @@ export async function recordProductError(productUrl, errorMessage, profileFileNa
  * @returns {Promise<object|null>}
  */
 export async function getProductByUrl(productUrl) {
-  const rows = await query(
-    'SELECT * FROM products WHERE product_url = ? LIMIT 1',
-    [productUrl],
-  );
-  if (!rows.length) return null;
-  const row = rows[0];
+  const row = await Product.findOne({ where: { product_url: productUrl }, raw: true });
+  if (!row) return null;
   row.images_local_paths = asArray(row.images_local_paths);
   row.images_remote_urls = asArray(row.images_remote_urls);
   return row;
@@ -234,16 +229,11 @@ export async function getProductByUrl(productUrl) {
  * @returns {Promise<void>}
  */
 export async function setProductProfile(productUrl, profileFileName) {
-  await query(
+  await writeSql(
     `INSERT INTO products (external_id, product_url, profile_file_name, raw_data)
      VALUES (?, ?, ?, ?)
      ON DUPLICATE KEY UPDATE profile_file_name = VALUES(profile_file_name)`,
-    [
-      productUrl.split('/').pop() || productUrl,
-      productUrl,
-      profileFileName,
-      JSON.stringify({}),
-    ],
+    [productUrl.split('/').pop() || productUrl, productUrl, profileFileName, JSON.stringify({})],
   );
 }
 
@@ -265,22 +255,16 @@ export async function recordCrawl(entry) {
     errorMessage = null,
   } = entry;
 
-  const result = await query(
-    `INSERT INTO crawl_history
-       (listing_url, products_found, new_products, failed_products,
-        crawl_duration_seconds, status, error_message)
-     VALUES (?, ?, ?, ?, ?, ?, ?)`,
-    [
-      listingUrl,
-      productsFound,
-      newProducts,
-      failedProducts,
-      durationSeconds,
-      status,
-      errorMessage,
-    ],
-  );
-  return result.insertId;
+  const row = await CrawlHistory.create({
+    listing_url: listingUrl,
+    products_found: productsFound,
+    new_products: newProducts,
+    failed_products: failedProducts,
+    crawl_duration_seconds: durationSeconds,
+    status,
+    error_message: errorMessage,
+  });
+  return row.id;
 }
 
 // ── pending_mappings ──────────────────────────────────────────────────────────
@@ -289,21 +273,14 @@ export async function recordCrawl(entry) {
  * Insert a pending mapping for review when no profile matches a URL pattern.
  * Idempotent on url_pattern.
  * @param {object} entry
- * @param {string} entry.urlPattern
- * @param {string} entry.sampleUrl
- * @param {object} [entry.autoDetectedFields]
  * @returns {Promise<void>}
  */
 export async function addPendingMapping({ urlPattern, sampleUrl, autoDetectedFields = null }) {
-  await query(
+  await writeSql(
     `INSERT INTO pending_mappings (url_pattern, sample_url, auto_detected_fields, status)
      VALUES (?, ?, ?, 'pending')
      ON DUPLICATE KEY UPDATE sample_url = VALUES(sample_url)`,
-    [
-      urlPattern,
-      sampleUrl,
-      autoDetectedFields ? JSON.stringify(autoDetectedFields) : null,
-    ],
+    [urlPattern, sampleUrl, autoDetectedFields ? JSON.stringify(autoDetectedFields) : null],
   );
 }
 
@@ -313,23 +290,23 @@ export async function addPendingMapping({ urlPattern, sampleUrl, autoDetectedFie
  * @returns {Promise<object[]>}
  */
 export async function listPendingMappings(status = 'pending') {
-  return query(
-    'SELECT * FROM pending_mappings WHERE status = ? ORDER BY created_at DESC',
-    [status],
-  );
+  return PendingMapping.findAll({
+    where: { status },
+    order: [['created_at', 'DESC']],
+    raw: true,
+  });
 }
 
 /**
- * Refresh the auto-detected fields stored against a pending mapping (used when
- * re-detecting unmapped patterns on a scheduled run).
+ * Refresh the auto-detected fields stored against a pending mapping.
  * @param {number} id
  * @param {object} autoDetectedFields
  * @returns {Promise<void>}
  */
 export async function updatePendingMappingFields(id, autoDetectedFields) {
-  await query(
-    'UPDATE pending_mappings SET auto_detected_fields = ? WHERE id = ?',
-    [JSON.stringify(autoDetectedFields ?? {}), id],
+  await PendingMapping.update(
+    { auto_detected_fields: autoDetectedFields ?? {} },
+    { where: { id } },
   );
 }
 
@@ -338,28 +315,54 @@ export async function updatePendingMappingFields(id, autoDetectedFields) {
 /**
  * List recently-seen products, newest first, with image arrays parsed.
  * @param {object} [opts]
- * @param {number} [opts.limit=50]
- * @param {boolean} [opts.scrapedOnly=false] - Only rows where scraped = TRUE.
  * @returns {Promise<object[]>}
  */
 export async function listRecentProducts({ limit = 50, scrapedOnly = false } = {}) {
   const lim = Math.max(1, Math.min(500, Number(limit) || 50));
-  const where = scrapedOnly ? 'WHERE scraped = TRUE' : '';
-  const rows = await query(
-    `SELECT id, external_id, product_url, profile_file_name, title, price,
-            scraped, scraped_at, first_seen_at, last_seen_at, is_active,
-            images_local_paths, images_remote_urls, last_error
-     FROM products ${where}
-     ORDER BY last_seen_at DESC
-     LIMIT ${lim}`,
-  );
+  const rows = await Product.findAll({
+    attributes: [
+      'id', 'external_id', 'product_url', 'profile_file_name', 'title', 'price',
+      'scraped', 'scraped_at', 'first_seen_at', 'last_seen_at', 'is_active',
+      'images_local_paths', 'images_remote_urls', 'last_error',
+      'synced_at', 'main_product_id',
+    ],
+    where: scrapedOnly ? { scraped: true } : undefined,
+    order: [['last_seen_at', 'DESC']],
+    limit: lim,
+    raw: true,
+  });
   return rows.map((r) => ({
     ...r,
     scraped: !!r.scraped,
     is_active: !!r.is_active,
+    synced: !!r.synced_at,
     images_local_paths: asArray(r.images_local_paths),
     images_remote_urls: asArray(r.images_remote_urls),
   }));
+}
+
+/**
+ * Mark products as synced to the main site (sets synced_at = now). Optionally
+ * stores the main-site product id when a 1:1 mapping is known.
+ * @param {number[]} ids
+ * @returns {Promise<number>} rows updated
+ */
+export async function markProductsSynced(ids, mainIdByProductId = {}) {
+  const clean = (Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n));
+  if (!clean.length) return 0;
+  const [count] = await Product.update(
+    { synced_at: literal('CURRENT_TIMESTAMP') },
+    { where: { id: { [Op.in]: clean } } },
+  );
+  // Store the main-site product id where the response provided a mapping.
+  for (const id of clean) {
+    const mid = mainIdByProductId[id];
+    if (mid != null) {
+      // eslint-disable-next-line no-await-in-loop
+      await Product.update({ main_product_id: Number(mid) }, { where: { id } });
+    }
+  }
+  return count;
 }
 
 /**
@@ -367,7 +370,7 @@ export async function listRecentProducts({ limit = 50, scrapedOnly = false } = {
  * @returns {Promise<{ total: number, scraped: number, unscraped: number }>}
  */
 export async function countProducts() {
-  const rows = await query(
+  const rows = await selectSql(
     `SELECT
        COUNT(*) AS total,
        SUM(scraped = TRUE) AS scraped,
@@ -384,43 +387,39 @@ export async function countProducts() {
 
 /**
  * Count products belonging to a site/domain (matched on the product URL host).
- * Used to enforce the per-profile product cap during discovery.
- * @param {string} domain - e.g. "www.labassets.com"
+ * @param {string} domain
  * @returns {Promise<number>}
  */
 export async function countProductsByDomain(domain) {
   if (!domain) return 0;
-  const rows = await query(
-    'SELECT COUNT(*) AS n FROM products WHERE product_url LIKE ?',
-    [`%://${domain}/%`],
-  );
-  return Number(rows[0]?.n) || 0;
+  return Product.count({ where: { product_url: { [Op.like]: `%://${domain}/%` } } });
 }
 
 /**
- * List recent crawl-history runs, newest first (for the History/Logs UI).
+ * List recent crawl-history runs, newest first.
  * @param {object} [opts]
- * @param {number} [opts.limit=100]
  * @returns {Promise<object[]>}
  */
 export async function listCrawlHistory({ limit = 100 } = {}) {
   const lim = Math.max(1, Math.min(500, Number(limit) || 100));
-  return query(
-    `SELECT id, listing_url, products_found, new_products, failed_products,
-            crawl_duration_seconds, status, error_message, timestamp
-     FROM crawl_history
-     ORDER BY timestamp DESC
-     LIMIT ${lim}`,
-  );
+  return CrawlHistory.findAll({
+    attributes: [
+      'id', 'listing_url', 'products_found', 'new_products', 'failed_products',
+      'crawl_duration_seconds', 'status', 'error_message', 'timestamp',
+    ],
+    order: [['timestamp', 'DESC']],
+    limit: lim,
+    raw: true,
+  });
 }
 
 /**
  * Latest crawl timestamp per listing URL — used to show "last scraped" per
- * profile on the Profiles page. One row per distinct listing_url.
+ * profile on the Profiles page.
  * @returns {Promise<Array<{ listing_url: string, last_timestamp: string }>>}
  */
 export async function getLastCrawlTimes() {
-  return query(
+  return selectSql(
     `SELECT listing_url, MAX(timestamp) AS last_timestamp
      FROM crawl_history
      GROUP BY listing_url`,
@@ -429,14 +428,13 @@ export async function getLastCrawlTimes() {
 
 /**
  * Fetch a single product row by its numeric id, with image arrays parsed and
- * raw_data decoded. Returns null when not found. Powers the products detail drawer.
+ * raw_data decoded. Returns null when not found.
  * @param {number} id
  * @returns {Promise<object|null>}
  */
 export async function getProductById(id) {
-  const rows = await query('SELECT * FROM products WHERE id = ? LIMIT 1', [id]);
-  if (!rows.length) return null;
-  const row = rows[0];
+  const row = await Product.findByPk(id, { raw: true });
+  if (!row) return null;
   row.scraped = !!row.scraped;
   row.is_active = !!row.is_active;
   row.images_local_paths = asArray(row.images_local_paths);
@@ -467,6 +465,7 @@ export default {
   listPendingMappings,
   updatePendingMappingFields,
   listRecentProducts,
+  markProductsSynced,
   countProducts,
   countProductsByDomain,
   listCrawlHistory,

@@ -1,10 +1,14 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { ArrowLeft, ArrowRight, Check, Link as LinkIcon } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { ArrowLeft, ArrowRight, Check, Link as LinkIcon, AlertTriangle, Play, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { useLayout } from '@/components/layout/layout-context';
+import { useProfiles, useRunProfile } from '@/hooks/useApi';
+import { useScrapeLock, formatRemaining } from '@/hooks/useScrapeLock';
+import type { ProfileListItem } from '@/types/api';
 import { useSelectorBridge } from './useSelectorBridge';
 import { PagePreview } from './PagePreview';
 import { FieldPanel } from './FieldPanel';
@@ -31,6 +35,10 @@ function hostOf(url: string): string {
   }
 }
 
+function normHost(url: string): string {
+  return hostOf(url).replace(/^www\./, '').toLowerCase();
+}
+
 export function MappingStudioPage() {
   const [draft, setDraft] = useState<MappingDraft>(emptyDraft);
   const [step, setStep] = useState(0);
@@ -38,6 +46,18 @@ export function MappingStudioPage() {
   const [loadingPage, setLoadingPage] = useState(false);
   const [hoverText, setHoverText] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [overrideAck, setOverrideAck] = useState(false);
+
+  // Detect an existing profile for the entered listing URL's domain.
+  const profiles = useProfiles().data?.profiles ?? [];
+  const matchedProfile = useMemo(() => {
+    const host = normHost(draft.listingUrl);
+    if (!host) return null;
+    return profiles.find((p) => p.domain && normHost(`http://${p.domain}`) === host) ?? null;
+  }, [profiles, draft.listingUrl]);
+
+  // Re-require the choice if the URL changes.
+  useEffect(() => setOverrideAck(false), [draft.listingUrl]);
 
   const update = useCallback((patch: Partial<MappingDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -189,7 +209,7 @@ export function MappingStudioPage() {
 
   const canNext =
     step === 0
-      ? isHttpUrl(draft.listingUrl)
+      ? isHttpUrl(draft.listingUrl) && (!matchedProfile || overrideAck)
       : step === 1
         ? isHttpUrl(draft.sampleProductUrl)
         : true;
@@ -215,7 +235,15 @@ export function MappingStudioPage() {
       <Stepper step={step} />
 
       <div className="mt-5">
-        {step === 0 && <UrlStep draft={draft} update={update} />}
+        {step === 0 && (
+          <UrlStep
+            draft={draft}
+            update={update}
+            matchedProfile={matchedProfile}
+            overrideAck={overrideAck}
+            onOverride={() => setOverrideAck(true)}
+          />
+        )}
 
         {(step === 1 || step === 2) && (
           <div className="grid h-[calc(100vh-340px)] min-h-[480px] grid-cols-1 gap-4 lg:grid-cols-[360px_1fr]">
@@ -315,10 +343,30 @@ function Stepper({ step }: { step: number }) {
 function UrlStep({
   draft,
   update,
+  matchedProfile,
+  overrideAck,
+  onOverride,
 }: {
   draft: MappingDraft;
   update: (p: Partial<MappingDraft>) => void;
+  matchedProfile: ProfileListItem | null;
+  overrideAck: boolean;
+  onOverride: () => void;
 }) {
+  const navigate = useNavigate();
+  const run = useRunProfile();
+  const lock = useScrapeLock(matchedProfile?.fileName ?? '');
+
+  const onScrapeExisting = () => {
+    if (!matchedProfile) return;
+    run.mutate(matchedProfile.fileName, {
+      onSuccess: () => {
+        lock.lock();
+        navigate('/products');
+      },
+    });
+  };
+
   return (
     <div className="mx-auto max-w-2xl">
       <div className="card p-6">
@@ -334,6 +382,43 @@ function UrlStep({
           value={draft.listingUrl}
           onChange={(e) => update({ listingUrl: e.target.value })}
         />
+
+        {matchedProfile && !overrideAck && (
+          <div className="mt-4 rounded-lg border border-warn/40 bg-amber-900/20 p-3">
+            <div className="flex items-start gap-2 text-xs text-amber-200">
+              <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+              <div>
+                A profile already matches this URL:{' '}
+                <code className="font-mono">{matchedProfile.fileName}</code>
+                {matchedProfile.profileName ? ` (${matchedProfile.profileName})` : ''}. Rebuilding
+                and saving with the same domain will <b>overwrite</b> it.
+              </div>
+            </div>
+            <div className="mt-3 flex flex-wrap gap-2">
+              <Button
+                size="sm"
+                icon={run.isPending ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Play className="h-3.5 w-3.5" />}
+                onClick={onScrapeExisting}
+                loading={run.isPending}
+                disabled={lock.locked || matchedProfile.listingUrls.length === 0}
+              >
+                {lock.locked ? `Scraping… ${formatRemaining(lock.remainingMs)}` : 'Scrape new products'}
+              </Button>
+              <Button size="sm" variant="secondary" onClick={onOverride}>
+                Override (rebuild profile)
+              </Button>
+            </div>
+            <p className="mt-2 text-[11px] text-amber-200/70">
+              “Scrape new products” runs the existing profile now. “Override” lets you re-map and
+              overwrite it.
+            </p>
+          </div>
+        )}
+        {matchedProfile && overrideAck && (
+          <p className="mt-3 text-[11px] text-warn">
+            Overwriting <code className="font-mono">{matchedProfile.fileName}</code> on save.
+          </p>
+        )}
         {/* <label className="mb-1 mt-4 block text-[11px] uppercase tracking-wide text-muted">
           Sample product URL (optional — auto-filled when you pick a product link)
         </label>

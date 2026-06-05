@@ -15,6 +15,10 @@ import type {
   SaveProfileResponse,
   ScrapeProgressResponse,
   StateResponse,
+  SyncBatchInput,
+  SyncMeta,
+  SyncPreviewResponse,
+  SyncSubmitResponse,
   UrlPatternResponse,
 } from '@/types/api';
 
@@ -134,6 +138,21 @@ export const api = {
     request<DeleteProfileResponse>('/delete-profile', {
       method: 'POST',
       body: JSON.stringify({ fileName }),
+    }),
+
+  // ── Sync to main site ───────────────────────────────────────────────────────
+  getSyncMeta: () => request<SyncMeta>('/sync/meta'),
+
+  previewSync: (body: SyncBatchInput) =>
+    request<SyncPreviewResponse>('/sync/preview', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  submitSync: (body: SyncBatchInput) =>
+    request<SyncSubmitResponse>('/sync/submit', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   getScrapeProgress: (id: string) =>

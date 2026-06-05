@@ -8,7 +8,9 @@
 import fs from 'node:fs/promises';
 import fssync from 'node:fs';
 import path from 'node:path';
+import { literal } from 'sequelize';
 import { CONSTANTS } from '../config/constants.js';
+import { Profile } from '../models/index.js';
 
 /**
  * Ensure a directory exists (recursive). Synchronous because it's used in
@@ -43,66 +45,80 @@ export async function listProfileFiles() {
 }
 
 /**
- * Read and parse a profile JSON file by filename.
- * @param {string} fileName - e.g. "profile_101lab.json".
- * @returns {Promise<object>} Parsed profile.
+ * Map a profile object to the `profiles` table columns. `file_name` stays the
+ * stable identity key the rest of the app uses; the full object is kept in the
+ * `config` JSON column (single source of truth), with key fields mirrored into
+ * queryable columns.
+ * @param {string} fileName
+ * @param {object} profile
  */
-export async function readProfile(fileName) {
-  const full = path.join(CONSTANTS.PROFILES_DIR, fileName);
-  const content = await fs.readFile(full, 'utf8');
-  return JSON.parse(content);
+function profileColumns(fileName, profile) {
+  return {
+    file_name: fileName,
+    profile_id: profile.profileId ?? null,
+    profile_name: profile.profileName ?? null,
+    domain: profile.domain ?? null,
+    source: profile.source || 'dom',
+    scrape_mode: profile.scrapeMode ?? null,
+    scrape_limit: profile.scrapeLimit ?? null,
+    download_images: !!profile.downloadImages,
+    paused: !!profile.paused,
+    url_pattern: profile.urlPattern ?? null,
+    config: profile,
+  };
 }
 
 /**
- * Read every profile, returning { fileName, profile } pairs. Skips files that
- * fail to parse (and reports them).
+ * Read a profile by its file_name key from the database.
+ * @param {string} fileName - e.g. "profile_101lab.json".
+ * @returns {Promise<object>} The stored profile object.
+ */
+export async function readProfile(fileName) {
+  const row = await Profile.findOne({ where: { file_name: fileName }, raw: true });
+  if (!row) throw new Error(`Profile not found: ${fileName}`);
+  return row.config;
+}
+
+/**
+ * Read every profile, returning { fileName, profile } pairs.
  * @returns {Promise<Array<{ fileName: string, profile: object }>>}
  */
 export async function readAllProfiles() {
-  const files = await listProfileFiles();
-  const results = [];
-  for (const fileName of files) {
-    try {
-      const profile = await readProfile(fileName);
-      results.push({ fileName, profile });
-    } catch (err) {
-      // Surface parse errors but keep going.
-      results.push({ fileName, profile: null, error: err.message });
-    }
-  }
-  return results;
+  const rows = await Profile.findAll({ order: [['file_name', 'ASC']], raw: true });
+  return rows.map((r) => ({ fileName: r.file_name, profile: r.config }));
 }
 
 /**
- * Write a profile object to disk as pretty JSON.
+ * Insert or update a profile (upsert on file_name).
  * @param {string} fileName
  * @param {object} profile
- * @returns {Promise<string>} The full path written.
+ * @returns {Promise<string>} The file_name key written.
  */
 export async function writeProfile(fileName, profile) {
-  await ensureDir(CONSTANTS.PROFILES_DIR);
-  const full = path.join(CONSTANTS.PROFILES_DIR, fileName);
-  await fs.writeFile(full, JSON.stringify(profile, null, 2) + '\n', 'utf8');
-  return full;
+  await Profile.upsert({
+    ...profileColumns(fileName, profile),
+    updated_at: literal('CURRENT_TIMESTAMP'),
+  });
+  return fileName;
 }
 
 /**
- * Check whether a profile file exists.
+ * Check whether a profile exists (async — now DB-backed).
  * @param {string} fileName
- * @returns {boolean}
+ * @returns {Promise<boolean>}
  */
-export function profileExists(fileName) {
-  return fssync.existsSync(path.join(CONSTANTS.PROFILES_DIR, fileName));
+export async function profileExists(fileName) {
+  const n = await Profile.count({ where: { file_name: fileName } });
+  return n > 0;
 }
 
 /**
- * Delete a profile file. Resolves quietly if it's already gone.
+ * Delete a profile. Resolves quietly if it's already gone.
  * @param {string} fileName
  * @returns {Promise<void>}
  */
 export async function deleteProfile(fileName) {
-  const full = path.join(CONSTANTS.PROFILES_DIR, fileName);
-  await fs.rm(full, { force: true });
+  await Profile.destroy({ where: { file_name: fileName } });
 }
 
 /**
