@@ -23,13 +23,36 @@ function toArr(v) {
  * Resolve a category for a product: an explicit override id wins; otherwise
  * best-effort auto-match against the marketplace tree using title + description.
  */
-export function resolveCategory({ marketplace, categoryId, product, overrides = {} }) {
+export function resolveCategory({
+  marketplace,
+  categoryId,
+  categoryName,
+  scrapedCategory,
+  scrapedSubcategory,
+  categoryMappings = {},
+  product,
+  overrides = {},
+}) {
   const flat = flattenCategories(marketplace);
+  // 0) Explicit admin override always wins.
   if (categoryId) {
     const found = flat.find((c) => String(c.term_id) === String(categoryId));
-    if (found) return { category: found, autoMatched: false };
+    if (found) return { category: { ...found, name: categoryName || found.name }, autoMatched: false };
+    // Selected from the live API (not in the bundled config) — trust the choice.
+    return { category: { term_id: Number(categoryId), name: categoryName || '', isSub: false }, autoMatched: false };
   }
-  const text = [overrides.product_title || product.title, product.description]
+  // 1) Saved category mapping (deterministic) — keyed by scraped category(+sub).
+  const key = `${scrapedCategory || ''}||${scrapedSubcategory || ''}`;
+  const mm = categoryMappings[key];
+  if (mm && mm.term_id) {
+    return {
+      category: { term_id: Number(mm.term_id), name: mm.name || '', isSub: false },
+      autoMatched: true,
+      fromMapping: true,
+    };
+  }
+  // 2) Best-effort fuzzy fallback on scraped category + title.
+  const text = [scrapedSubcategory, scrapedCategory, overrides.product_title || product.title, product.description]
     .filter(Boolean)
     .join(' ');
   const m = matchCategory(marketplace, text);
@@ -42,15 +65,31 @@ export function resolveCategory({ marketplace, categoryId, product, overrides = 
  * @param {string} args.marketplaceKey - marketplace name or site_type value
  * @param {object} args.seller    - { id, displayName }
  * @param {string} args.country
+ * @param {string} [args.defaultCurrency] - the product's profile priceCurrency (pre-selects price_currency)
  * @param {object} [args.overrides] - per-product admin edits (incl. categoryId)
  * @returns {{ productId:number, mapped:object, images:string[], category:object|null, categoryMatched:boolean, autoMatched:boolean, missing:string[], syncable:boolean }}
  */
-export function mapProduct({ product, marketplaceKey, seller, country, overrides = {} }) {
+export function mapProduct({
+  product,
+  marketplaceKey,
+  seller,
+  country,
+  defaultCurrency,
+  categoryMappings = {},
+  overrides = {},
+}) {
   const marketplace = getMarketplace(marketplaceKey);
   const site_type = siteTypeFor(marketplace ? marketplace.name : marketplaceKey);
-  const { category, autoMatched } = resolveCategory({
+  const rd = product.raw_data && typeof product.raw_data === 'object' ? product.raw_data : {};
+  const scrapedCategory = rd.category ? String(rd.category) : null;
+  const scrapedSubcategory = rd.subcategory ? String(rd.subcategory) : null;
+  const { category, autoMatched, fromMapping } = resolveCategory({
     marketplace,
     categoryId: overrides.categoryId,
+    categoryName: overrides.categoryName,
+    scrapedCategory,
+    scrapedSubcategory,
+    categoryMappings,
     product,
     overrides,
   });
@@ -85,7 +124,7 @@ export function mapProduct({ product, marketplaceKey, seller, country, overrides
     item_grade: overrides.item_grade ?? '',
     price_now_enabled: SYNC_DEFAULTS.price_now_enabled,
     price_format: overrides.price_format ?? SYNC_DEFAULTS.price_format,
-    price_currency: overrides.price_currency ?? SYNC_DEFAULTS.price_currency,
+    price_currency: overrides.price_currency ?? defaultCurrency ?? SYNC_DEFAULTS.price_currency,
     price_per_unit: rawPrice === '' ? '' : String(rawPrice),
     item_condition: toArr(overrides.item_condition),
     operation_status: overrides.operation_status
@@ -119,6 +158,9 @@ export function mapProduct({ product, marketplaceKey, seller, country, overrides
     category: category ? { ...category, autoMatched } : null,
     categoryMatched: !!category,
     autoMatched,
+    fromMapping: !!fromMapping,
+    scrapedCategory,
+    scrapedSubcategory,
     missing,
     syncable: missing.length === 0,
   };

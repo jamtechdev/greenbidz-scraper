@@ -9,8 +9,29 @@
  * booleans) are preserved so nothing downstream changes.
  */
 
+import path from 'node:path';
 import { Op, QueryTypes, literal } from 'sequelize';
-import { sequelize, Product, CrawlHistory, PendingMapping } from '../models/index.js';
+import { sequelize, Product, CrawlHistory, PendingMapping, CategoryMapping } from '../models/index.js';
+import { CONSTANTS } from '../config/constants.js';
+
+/**
+ * Convert stored absolute local image paths to URL paths served by the backend
+ * under /downloads (e.g. /downloads/labassets.com/347/image_01.jpg). Paths
+ * outside DOWNLOADS_DIR (e.g. from another machine) are dropped.
+ */
+function toLocalUrls(localPaths) {
+  return asArray(localPaths)
+    .map((p) => {
+      try {
+        const rel = path.relative(CONSTANTS.DOWNLOADS_DIR, String(p));
+        if (!rel || rel.startsWith('..') || path.isAbsolute(rel)) return null;
+        return '/downloads/' + rel.split(path.sep).join('/');
+      } catch {
+        return null;
+      }
+    })
+    .filter(Boolean);
+}
 
 /** Run raw SELECT SQL with positional `?` params, returning rows. */
 function selectSql(text, replacements = []) {
@@ -218,6 +239,7 @@ export async function getProductByUrl(productUrl) {
   const row = await Product.findOne({ where: { product_url: productUrl }, raw: true });
   if (!row) return null;
   row.images_local_paths = asArray(row.images_local_paths);
+  row.images_local_urls = toLocalUrls(row.images_local_paths);
   row.images_remote_urls = asArray(row.images_remote_urls);
   return row;
 }
@@ -249,6 +271,7 @@ export async function recordCrawl(entry) {
     listingUrl,
     productsFound = 0,
     newProducts = 0,
+    scrapedProducts = 0,
     failedProducts = 0,
     durationSeconds = 0,
     status = 'completed',
@@ -259,6 +282,7 @@ export async function recordCrawl(entry) {
     listing_url: listingUrl,
     products_found: productsFound,
     new_products: newProducts,
+    scraped_products: scrapedProducts,
     failed_products: failedProducts,
     crawl_duration_seconds: durationSeconds,
     status,
@@ -313,32 +337,153 @@ export async function updatePendingMappingFields(id, autoDetectedFields) {
 // ── read helpers (for the web UI / reporting) ────────────────────────────────
 
 /**
- * List recently-seen products, newest first, with image arrays parsed.
+ * List products (newest first) with server-side pagination + filtering, so the
+ * UI can page through the ENTIRE table.
  * @param {object} [opts]
- * @returns {Promise<object[]>}
+ * @param {number} [opts.limit=50]
+ * @param {number} [opts.offset=0]
+ * @param {'all'|'scraped'|'unscraped'} [opts.status='all']
+ * @param {boolean} [opts.scrapedOnly] - legacy alias for status='scraped'
+ * @param {string} [opts.profile] - filter by profile_file_name
+ * @param {string} [opts.search] - matches title / product_url / external_id
+ * @returns {Promise<{ products: object[], total: number }>}
  */
-export async function listRecentProducts({ limit = 50, scrapedOnly = false } = {}) {
+export async function listRecentProducts({
+  limit = 50,
+  offset = 0,
+  status = 'all',
+  scrapedOnly = false,
+  profile,
+  search,
+} = {}) {
   const lim = Math.max(1, Math.min(500, Number(limit) || 50));
-  const rows = await Product.findAll({
+  const off = Math.max(0, Number(offset) || 0);
+
+  const where = {};
+  const st = scrapedOnly ? 'scraped' : status;
+  if (st === 'scraped') where.scraped = true;
+  else if (st === 'unscraped') where.scraped = false;
+  if (profile) where.profile_file_name = profile;
+  const q = String(search || '').trim();
+  if (q) {
+    where[Op.or] = [
+      { title: { [Op.like]: `%${q}%` } },
+      { product_url: { [Op.like]: `%${q}%` } },
+      { external_id: { [Op.like]: `%${q}%` } },
+    ];
+  }
+
+  const { rows, count } = await Product.findAndCountAll({
     attributes: [
       'id', 'external_id', 'product_url', 'profile_file_name', 'title', 'price',
       'scraped', 'scraped_at', 'first_seen_at', 'last_seen_at', 'is_active',
       'images_local_paths', 'images_remote_urls', 'last_error',
       'synced_at', 'main_product_id',
     ],
-    where: scrapedOnly ? { scraped: true } : undefined,
+    where,
     order: [['last_seen_at', 'DESC']],
     limit: lim,
+    offset: off,
     raw: true,
   });
-  return rows.map((r) => ({
+
+  const products = rows.map((r) => ({
     ...r,
     scraped: !!r.scraped,
     is_active: !!r.is_active,
     synced: !!r.synced_at,
     images_local_paths: asArray(r.images_local_paths),
+    images_local_urls: toLocalUrls(r.images_local_paths),
     images_remote_urls: asArray(r.images_remote_urls),
   }));
+  return { products, total: count };
+}
+
+/**
+ * Delete products by id (e.g. removing a listing from the scraper DB).
+ * @param {number[]} ids
+ * @returns {Promise<number>} rows deleted
+ */
+export async function deleteProducts(ids) {
+  const clean = (Array.isArray(ids) ? ids : []).map(Number).filter((n) => Number.isInteger(n));
+  if (!clean.length) return 0;
+  return Product.destroy({ where: { id: { [Op.in]: clean } } });
+}
+
+// ── category mappings (source category → main-site category) ──────────────────
+
+/**
+ * Distinct scraped (category, subcategory) values from products' raw_data,
+ * optionally scoped to a profile or a set of product ids.
+ * @returns {Promise<Array<{ category: string, subcategory: string }>>}
+ */
+export async function getDistinctSourceCategories({ profile, productIds } = {}) {
+  // Resolve the profile(s) to show ALL of a profile's scraped categories (not
+  // just the selected products). If productIds are given, expand to their
+  // distinct profile_file_name(s).
+  let profiles = profile ? [profile] : null;
+  const ids = (Array.isArray(productIds) ? productIds : []).map(Number).filter((n) => Number.isInteger(n));
+  if (!profiles && ids.length) {
+    const prows = await sequelize.query(
+      'SELECT DISTINCT profile_file_name AS p FROM products WHERE id IN (:ids) AND profile_file_name IS NOT NULL',
+      { replacements: { ids }, type: QueryTypes.SELECT },
+    );
+    profiles = prows.map((r) => r.p).filter(Boolean);
+  }
+
+  const conds = ["JSON_EXTRACT(raw_data, '$.category') IS NOT NULL"];
+  const repl = {};
+  if (profiles && profiles.length) {
+    conds.push('profile_file_name IN (:profiles)');
+    repl.profiles = profiles;
+  } else if (ids.length) {
+    conds.push('id IN (:ids)');
+    repl.ids = ids;
+  }
+  const rows = await sequelize.query(
+    `SELECT DISTINCT
+       JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.category')) AS category,
+       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.subcategory')), '') AS subcategory
+     FROM products
+     WHERE ${conds.join(' AND ')}
+     ORDER BY category, subcategory`,
+    { replacements: repl, type: QueryTypes.SELECT },
+  );
+  return rows
+    .map((r) => ({
+      category: r.category,
+      subcategory: r.subcategory === 'null' || r.subcategory == null ? '' : r.subcategory,
+    }))
+    .filter((r) => r.category && r.category !== 'null');
+}
+
+/** List saved category mappings for a site_type. */
+export async function listCategoryMappings(siteType) {
+  return CategoryMapping.findAll({ where: { site_type: siteType }, raw: true });
+}
+
+/**
+ * Upsert category mappings for a site_type.
+ * @param {string} siteType
+ * @param {Array<{source_category, source_subcategory?, main_term_id, main_term_name?}>} mappings
+ * @returns {Promise<number>} rows written
+ */
+export async function saveCategoryMappings(siteType, mappings) {
+  const rows = (Array.isArray(mappings) ? mappings : [])
+    .filter((m) => m && m.source_category && m.main_term_id)
+    .map((m) => ({
+      site_type: siteType,
+      source_category: String(m.source_category),
+      source_subcategory: m.source_subcategory ? String(m.source_subcategory) : '',
+      main_term_id: Number(m.main_term_id),
+      main_term_name: m.main_term_name ? String(m.main_term_name) : null,
+      updated_at: new Date(),
+    }));
+  if (!rows.length) return 0;
+  await CategoryMapping.bulkCreate(rows, {
+    updateOnDuplicate: ['main_term_id', 'main_term_name', 'updated_at'],
+  });
+  return rows.length;
 }
 
 /**
@@ -404,7 +549,7 @@ export async function listCrawlHistory({ limit = 100 } = {}) {
   const lim = Math.max(1, Math.min(500, Number(limit) || 100));
   return CrawlHistory.findAll({
     attributes: [
-      'id', 'listing_url', 'products_found', 'new_products', 'failed_products',
+      'id', 'listing_url', 'products_found', 'new_products', 'scraped_products', 'failed_products',
       'crawl_duration_seconds', 'status', 'error_message', 'timestamp',
     ],
     order: [['timestamp', 'DESC']],
@@ -438,6 +583,7 @@ export async function getProductById(id) {
   row.scraped = !!row.scraped;
   row.is_active = !!row.is_active;
   row.images_local_paths = asArray(row.images_local_paths);
+  row.images_local_urls = toLocalUrls(row.images_local_paths);
   row.images_remote_urls = asArray(row.images_remote_urls);
   if (typeof row.raw_data === 'string') {
     try {
@@ -465,7 +611,11 @@ export default {
   listPendingMappings,
   updatePendingMappingFields,
   listRecentProducts,
+  deleteProducts,
   markProductsSynced,
+  getDistinctSourceCategories,
+  listCategoryMappings,
+  saveCategoryMappings,
   countProducts,
   countProductsByDomain,
   listCrawlHistory,

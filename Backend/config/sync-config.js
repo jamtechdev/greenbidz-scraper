@@ -50,14 +50,17 @@ export const SYNC_DEFAULTS = {
   steps: '1',
   from_agent: true,
   price_now_enabled: '1',
+  is_scraped: true,
 };
 
 /** Selectable option sets (extend as the main site adds values). */
 export const ENUMS = {
   product_type: ['simple', 'auction'],
   price_format: ['buyNow', 'auction'],
-  price_currency: ['USD', 'EUR', 'THB', 'GBP'],
-  item_condition: ['new', 'usedFunctional', 'usedNonFunctional', 'refurbished', 'forParts'],
+  price_currency: ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY'],
+  // Only two selectable conditions on the sync UI. Values are the main API's
+  // codes; the UI shows friendly labels (new → "New", usedFunctional → "Used").
+  item_condition: ['new', 'usedFunctional'],
   item_grade: ['A', 'B', 'C', 'D'],
   operation_status: ['deinstalled', 'installed', 'running'],
   visibility: ['PUBLIC', 'PRIVATE'],

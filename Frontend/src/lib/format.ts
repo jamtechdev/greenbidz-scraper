@@ -5,14 +5,20 @@ export function formatNumber(n: number | null | undefined): string {
   return new Intl.NumberFormat('en-US').format(n);
 }
 
-export function formatPrice(p: number | string | null | undefined): string {
+export function formatPrice(
+  p: number | string | null | undefined,
+  currency: string | null | undefined = 'USD',
+): string {
   if (p == null || p === '') return '—';
   const n = typeof p === 'string' ? Number(p) : p;
   if (Number.isNaN(n)) return String(p);
-  return new Intl.NumberFormat('en-US', {
-    style: 'currency',
-    currency: 'USD',
-  }).format(n);
+  const cur = (currency || 'USD').toUpperCase();
+  try {
+    return new Intl.NumberFormat('en-US', { style: 'currency', currency: cur }).format(n);
+  } catch {
+    // Unknown/invalid currency code → plain number with the code appended.
+    return `${new Intl.NumberFormat('en-US').format(n)} ${cur}`;
+  }
 }
 
 export function formatDate(iso: string | null | undefined): string {

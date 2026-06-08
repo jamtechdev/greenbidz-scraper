@@ -16,15 +16,18 @@ import type {
   ScrapeProgressResponse,
   StateResponse,
   SyncBatchInput,
+  SyncCategoriesResponse,
   SyncMeta,
   SyncPreviewResponse,
+  SyncSellersResponse,
+  SyncSourceCategoriesResponse,
   SyncSubmitResponse,
   UrlPatternResponse,
 } from '@/types/api';
 
 // Backend API origin. Empty string would fall back to same-origin; we default
 // to the local backend port so the frontend talks to it directly.
-const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '');
+export const API_BASE = (import.meta.env.VITE_API_BASE_URL ?? 'http://localhost:4000').replace(/\/$/, '');
 
 export class ApiError extends Error {
   status: number;
@@ -74,7 +77,11 @@ function safeParse(text: string): unknown {
 
 export interface ProductsQuery {
   limit?: number;
+  offset?: number;
   scrapedOnly?: boolean;
+  status?: 'all' | 'scraped' | 'unscraped';
+  profile?: string;
+  search?: string;
 }
 
 export const api = {
@@ -83,12 +90,22 @@ export const api = {
   getProducts: (q: ProductsQuery = {}) => {
     const params = new URLSearchParams();
     if (q.limit) params.set('limit', String(q.limit));
+    if (q.offset) params.set('offset', String(q.offset));
     if (q.scrapedOnly) params.set('scrapedOnly', 'true');
+    if (q.status && q.status !== 'all') params.set('status', q.status);
+    if (q.profile) params.set('profile', q.profile);
+    if (q.search) params.set('search', q.search);
     const qs = params.toString();
     return request<ProductsResponse>(`/products${qs ? `?${qs}` : ''}`);
   },
 
   getProduct: (id: number) => request<{ product: Product }>(`/products/${id}`),
+
+  deleteProducts: (ids: number[]) =>
+    request<{ ok: boolean; deleted: number }>('/products/delete', {
+      method: 'POST',
+      body: JSON.stringify({ ids }),
+    }),
 
   getCrawlHistory: (limit = 100) =>
     request<CrawlHistoryResponse>(`/crawl-history?limit=${limit}`),
@@ -142,6 +159,41 @@ export const api = {
 
   // ── Sync to main site ───────────────────────────────────────────────────────
   getSyncMeta: () => request<SyncMeta>('/sync/meta'),
+
+  getSyncCategories: (siteType: string, language = 'en') =>
+    request<SyncCategoriesResponse>(
+      `/sync/categories?siteType=${encodeURIComponent(siteType)}&language=${language}`,
+    ),
+
+  getSourceCategories: (siteType: string, opts: { profile?: string; productIds?: number[] } = {}) => {
+    const params = new URLSearchParams();
+    params.set('siteType', siteType);
+    if (opts.profile) params.set('profile', opts.profile);
+    if (opts.productIds?.length) params.set('productIds', opts.productIds.join(','));
+    return request<SyncSourceCategoriesResponse>(`/sync/source-categories?${params.toString()}`);
+  },
+
+  saveCategoryMappings: (body: {
+    siteType: string;
+    mappings: Array<{
+      source_category: string;
+      source_subcategory: string;
+      main_term_id: number;
+      main_term_name: string;
+    }>;
+  }) =>
+    request<{ ok: boolean; written: number }>('/sync/category-mappings', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  getSyncSellers: (q: { search?: string; page?: number; limit?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.search) params.set('search', q.search);
+    if (q.page) params.set('page', String(q.page));
+    params.set('limit', String(q.limit ?? 20));
+    return request<SyncSellersResponse>(`/sync/sellers?${params.toString()}`);
+  },
 
   previewSync: (body: SyncBatchInput) =>
     request<SyncPreviewResponse>('/sync/preview', {

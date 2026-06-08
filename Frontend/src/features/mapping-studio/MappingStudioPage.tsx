@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { ArrowLeft, ArrowRight, Check, Link as LinkIcon, AlertTriangle, Play, Loader2 } from 'lucide-react';
 import { api } from '@/lib/api';
@@ -47,6 +47,8 @@ export function MappingStudioPage() {
   const [hoverText, setHoverText] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
   const [overrideAck, setOverrideAck] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
+  const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Detect an existing profile for the entered listing URL's domain.
   const profiles = useProfiles().data?.profiles ?? [];
@@ -108,7 +110,11 @@ export function MappingStudioPage() {
 
   const bridge = useSelectorBridge({
     onPicked,
-    onReady: () => setLoadingPage(false),
+    onReady: () => {
+      if (loadTimer.current) clearTimeout(loadTimer.current);
+      setLoadingPage(false);
+      setLoadError(null);
+    },
     onHover: (m) => setHoverText(m.text),
   });
 
@@ -175,14 +181,41 @@ export function MappingStudioPage() {
     [targetUrl, reloadNonce],
   );
 
-  // Reset interaction state whenever the loaded page changes.
+  // Reset interaction state whenever the loaded page changes, and arm a timeout
+  // so a page that never finishes rendering surfaces an error (not an endless spinner).
   useEffect(() => {
-    if (src) {
-      setLoadingPage(true);
-      setArmedKey(null);
-      setHoverText(null);
-    }
+    if (!src) return undefined;
+    setLoadingPage(true);
+    setLoadError(null);
+    setArmedKey(null);
+    setHoverText(null);
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    loadTimer.current = setTimeout(() => {
+      setLoadingPage(false);
+      setLoadError(
+        'This page took too long to render. It may be very slow or blocking automated access — try Reload, or check the URL.',
+      );
+    }, 90000);
+    return () => {
+      if (loadTimer.current) clearTimeout(loadTimer.current);
+    };
   }, [src]);
+
+  // Navigate the preview's address bar to a new URL (updates the step's target).
+  const onNavigate = useCallback(
+    (u: string) => {
+      if (step === 1) update({ listingUrl: u });
+      else if (step === 2) update({ sampleProductUrl: u });
+    },
+    [step, update],
+  );
+
+  // Fail fast when the backend returns its "could not render" HTML page.
+  const onRenderError = useCallback((msg: string) => {
+    if (loadTimer.current) clearTimeout(loadTimer.current);
+    setLoadingPage(false);
+    setLoadError(msg);
+  }, []);
 
   // Collapse the sidebar while the render screen is shown (steps 1 & 2) so the
   // external website gets a big canvas; restore it elsewhere and on unmount.
@@ -259,6 +292,7 @@ export function MappingStudioPage() {
                 onToggleRequired={toggleRequired}
                 onSetType={setType}
                 onRemoveImage={removeImage}
+                onSetCurrency={(c) => update({ priceCurrency: c })}
                 countMatches={countMatches}
               />
             </div>
@@ -266,9 +300,13 @@ export function MappingStudioPage() {
               iframeRef={bridge.iframeRef}
               src={src}
               loading={loadingPage}
+              error={loadError}
               armedLabel={armedLabel}
               hoverText={hoverText}
+              url={targetUrl}
               onReload={() => setReloadNonce((n) => n + 1)}
+              onNavigate={onNavigate}
+              onRenderError={onRenderError}
             />
           </div>
         )}

@@ -2,11 +2,11 @@ import { useCallback, useEffect, useState } from 'react';
 
 /**
  * Per-profile "scraping" lock persisted in localStorage. After a scrape is
- * triggered, the profile's scrape button stays disabled for LOCK_MS (20 min)
+ * triggered, the profile's scrape button stays disabled for LOCK_MS (10 min)
  * across reloads. Keyed by the profile's fileName.
  */
 const PREFIX = 'scrapeLock:';
-const LOCK_MS = 20 * 60 * 1000;
+const LOCK_MS = 10 * 60 * 1000;
 
 function readExpiry(fileName: string): number {
   try {

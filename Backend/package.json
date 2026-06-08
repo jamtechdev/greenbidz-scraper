@@ -18,7 +18,7 @@
     "edit-mapping": "node manual-mapping/edit-profile.js",
     "validate-mappings": "node manual-mapping/validate-profile.js",
     "manual-override": "node manual-run.js --override",
-    "dev": "node server.js",
+    "dev": "nodemon server.js",
     "share": "cloudflared tunnel --url http://localhost:5173 --no-autoupdate",
     "recon": "node scripts/recon.js"
   },
@@ -38,6 +38,7 @@
     "express": "^5.2.1",
     "mysql2": "^3.11.0",
     "node-cron": "^3.0.3",
+    "nodemon": "^3.1.14",
     "prompts": "^2.4.2",
     "puppeteer": "^23.0.0",
     "puppeteer-extra": "^3.3.6",

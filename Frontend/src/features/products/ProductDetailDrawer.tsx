@@ -5,6 +5,7 @@ import { LoadingState, ErrorState } from '@/components/ui/states';
 import { useProduct } from '@/hooks/useApi';
 import type { Product } from '@/types/api';
 import { formatDate, formatPrice } from '@/lib/format';
+import { productImageUrls } from '@/lib/productImage';
 
 export function ProductDetailDrawer({
   product,
@@ -31,7 +32,8 @@ export function ProductDetailDrawer({
 
           {/* Key facts */}
           <div className="grid grid-cols-2 gap-3">
-            <Fact label="Price" value={formatPrice(full.price)} />
+            <Fact label="Price" value={formatPrice(full.price, full.price_currency)} />
+            <Fact label="Currency" value={full.price_currency || 'USD'} mono />
             <Fact
               label="Status"
               value={<Badge tone={full.scraped ? 'yes' : 'no'}>{full.scraped ? 'scraped' : 'pending'}</Badge>}
@@ -88,7 +90,7 @@ export function ProductDetailDrawer({
 }
 
 function Gallery({ product }: { product: Product }) {
-  const images = [...(product.images_remote_urls ?? [])];
+  const images = productImageUrls(product);
   if (!images.length) {
     return (
       <div className="flex h-40 items-center justify-center rounded-lg border border-dashed border-line text-muted">

@@ -1,10 +1,8 @@
 import {
   LayoutDashboard,
-  Globe,
   FileCode2,
   Package,
   History,
-  ClipboardList,
   CalendarClock,
   Settings,
   MousePointerClick,

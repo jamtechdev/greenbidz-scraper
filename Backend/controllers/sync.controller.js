@@ -6,7 +6,14 @@
  *   POST /api/sync/submit   → build multipart + POST to create-grouped-listings (live)
  */
 import { logger } from '../utils/logger.js';
-import { getProductById, markProductsSynced } from '../database/queries.js';
+import {
+  getProductById,
+  markProductsSynced,
+  getDistinctSourceCategories,
+  listCategoryMappings,
+  saveCategoryMappings,
+} from '../database/queries.js';
+import { readAllProfiles } from '../utils/file-manager.js';
 import { mapProduct } from '../services/syncMapper.js';
 import {
   MARKETPLACES,
@@ -20,6 +27,155 @@ import {
 
 const MAIN_API_BASE_URL = process.env.MAIN_API_BASE_URL || 'https://api.101recycle.greenbidz.com';
 const MAIN_API_SYSTEM_KEY = process.env.MAIN_API_SYSTEM_KEY || '';
+const MAIN_PLATFORM = process.env.MAIN_PLATFORM || 'LabGreenbidz';
+
+// Live category endpoints per site_type (public — no auth). Lang param differs.
+const CATEGORY_ENDPOINTS = {
+  LabGreenbidz: { path: '/api/v1/product/lab/category', langParam: 'language' },
+  machines: { path: '/api/v1/product/machines/category', langParam: 'language' },
+  '101it': { path: '/api/v1/product/it/category', langParam: 'language' },
+  recycle: { path: '/api/v1/product/category', langParam: 'lang' },
+};
+
+/** Defensively normalize an unknown category API payload to our tree shape. */
+function normalizeCategories(json) {
+  const arr = Array.isArray(json)
+    ? json
+    : Array.isArray(json?.data) ? json.data
+      : Array.isArray(json?.categories) ? json.categories
+        : Array.isArray(json?.data?.categories) ? json.data.categories
+          : Array.isArray(json?.data?.data) ? json.data.data
+            : null;
+  if (!arr) return null;
+  const id = (o) => o?.id ?? o?.term_id ?? o?.category_id ?? o?.cat_id;
+  const name = (o) => o?.name ?? o?.title ?? o?.label ?? o?.category_name;
+  const subs = (o) => o?.subcategories ?? o?.subCategories ?? o?.children ?? o?.sub ?? [];
+  const cats = arr
+    .map((c) => {
+      const cid = id(c);
+      const cname = name(c);
+      if (cid == null || !cname) return null;
+      const sub = (subs(c) || [])
+        .map((s) => {
+          const sid = id(s);
+          const sname = name(s);
+          return sid == null || !sname ? null : { id: sid, name: sname, slug: s.slug ?? null, parent: cid };
+        })
+        .filter(Boolean);
+      return { id: cid, name: cname, slug: c.slug ?? null, subcategories: sub };
+    })
+    .filter(Boolean);
+  return cats.length ? cats : null;
+}
+
+/**
+ * GET /api/sync/categories?siteType=&language= — live categories for a site_type,
+ * with a silent fallback to the static marketplaces.json on any failure.
+ */
+export async function getSyncCategories(req, res) {
+  const mp = getMarketplace(req.query.siteType);
+  if (!mp) return res.status(400).json({ error: `Unknown siteType: ${req.query.siteType}` });
+  const siteType = siteTypeFor(mp.name);
+  const language = String(req.query.language || 'en');
+  const cfg = CATEGORY_ENDPOINTS[siteType];
+
+  if (cfg) {
+    try {
+      const url = `${MAIN_API_BASE_URL}${cfg.path}?${cfg.langParam}=${encodeURIComponent(language)}`;
+      const upstream = await fetch(url, { headers: { Accept: 'application/json' } });
+      if (upstream.ok) {
+        const json = await upstream.json();
+        const categories = normalizeCategories(json);
+        if (categories) return res.json({ categories, source: 'api', siteType });
+      }
+      logger.warn(`Category API for ${siteType} returned an unusable shape — using config.`);
+    } catch (err) {
+      logger.warn(`Category API for ${siteType} failed (${err.message}) — using config.`);
+    }
+  }
+  // Silent fallback to the bundled config.
+  res.json({ categories: mp.categories, source: 'config', siteType });
+}
+
+/**
+ * GET /api/sync/source-categories?siteType=&profile=&productIds=
+ * Distinct scraped categories (from products) merged with their saved mapping.
+ */
+export async function getSourceCategories(req, res) {
+  const mp = getMarketplace(req.query.siteType);
+  if (!mp) return res.status(400).json({ error: `Unknown siteType: ${req.query.siteType}` });
+  const siteType = siteTypeFor(mp.name);
+  const profile = req.query.profile || undefined;
+  const productIds = req.query.productIds
+    ? String(req.query.productIds).split(',').map((s) => Number(s.trim())).filter((n) => Number.isInteger(n))
+    : undefined;
+
+  const sources = await getDistinctSourceCategories({ profile, productIds });
+  const mappings = await listCategoryMappings(siteType);
+  const key = (c, s) => `${c}||${s || ''}`;
+  const byKey = new Map(mappings.map((m) => [key(m.source_category, m.source_subcategory), m]));
+
+  const items = sources.map((s) => {
+    const m = byKey.get(key(s.category, s.subcategory));
+    return {
+      source_category: s.category,
+      source_subcategory: s.subcategory,
+      main_term_id: m ? m.main_term_id : null,
+      main_term_name: m ? m.main_term_name : null,
+    };
+  });
+  res.json({ siteType, items });
+}
+
+/** POST /api/sync/category-mappings { siteType, mappings: [...] } */
+export async function postCategoryMappings(req, res) {
+  const { siteType, mappings } = req.body || {};
+  const mp = getMarketplace(siteType);
+  if (!mp) return res.status(400).json({ error: 'Valid siteType required.' });
+  const written = await saveCategoryMappings(siteTypeFor(mp.name), mappings);
+  logger.success(`Saved ${written} category mapping(s) for ${siteTypeFor(mp.name)}.`);
+  res.json({ ok: true, written });
+}
+
+/** GET /api/sync/sellers?search=&page=&limit= — proxy the main site's seller list. */
+export async function getSyncSellers(req, res) {
+  if (!MAIN_API_SYSTEM_KEY) {
+    return res.status(500).json({ error: 'MAIN_API_SYSTEM_KEY is not configured in the backend .env.' });
+  }
+  const params = new URLSearchParams();
+  if (req.query.search) params.set('search', String(req.query.search));
+  params.set('page', String(req.query.page || 1));
+  params.set('limit', String(req.query.limit || 20));
+  const url = `${MAIN_API_BASE_URL}/api/v1/admin/seller?${params.toString()}`;
+
+  let upstream;
+  try {
+    upstream = await fetch(url, {
+      headers: { 'x-system-key': MAIN_API_SYSTEM_KEY, 'x-platform': MAIN_PLATFORM },
+    });
+  } catch (err) {
+    return res.status(502).json({ error: `Could not reach main API: ${err.message}` });
+  }
+  const text = await upstream.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = null;
+  }
+  if (!upstream.ok || !data?.success) {
+    return res.status(502).json({ error: 'Main API seller fetch failed.', status: upstream.status });
+  }
+  const list = data.data?.data ?? [];
+  const sellers = list.map((s) => ({
+    id: s.seller_id,
+    displayName: s.company_name || s.email || `Seller #${s.seller_id}`,
+    email: s.email,
+    totalListings: s.total_listings,
+    currency: s.currency,
+  }));
+  res.json({ sellers, pagination: data.data?.pagination ?? null });
+}
 
 /** GET /api/sync/meta — everything the UI needs to render the sync flow. */
 export function getSyncMeta(req, res) {
@@ -39,15 +195,42 @@ export function getSyncMeta(req, res) {
 
 /** Load + map the selected products for a batch. Shared by preview & submit. */
 async function buildBatch(body) {
-  const { productIds, marketplace, sellerId, country, overrides = {} } = body || {};
+  const { productIds, marketplace, sellerId, sellerName, country, overrides = {} } = body || {};
   if (!Array.isArray(productIds) || !productIds.length) {
     return { error: 'productIds (non-empty array) required.' };
   }
   if (!marketplace) return { error: 'marketplace (site_type) required.' };
   if (!getMarketplace(marketplace)) return { error: `Unknown marketplace: ${marketplace}` };
 
-  const seller = SELLERS.find((s) => String(s.id) === String(sellerId));
-  if (!seller) return { error: 'Valid sellerId required.' };
+  // Sellers come from the main site (loaded via /api/sync/sellers); the chosen
+  // id + name are passed in.
+  if (sellerId == null || Number.isNaN(Number(sellerId))) return { error: 'Valid sellerId required.' };
+  const seller = { id: Number(sellerId), displayName: sellerName || `Seller #${sellerId}` };
+
+  // Map each profile's fileName → its configured priceCurrency, so the sync
+  // form pre-selects the currency the product was scraped with.
+  const currencyByProfile = {};
+  try {
+    for (const e of await readAllProfiles()) {
+      if (e.profile?.priceCurrency) currencyByProfile[e.fileName] = e.profile.priceCurrency;
+    }
+  } catch {
+    /* profiles unavailable — fall back to default currency */
+  }
+
+  // Saved category mappings for this site_type → deterministic auto-select.
+  const siteType = siteTypeFor(getMarketplace(marketplace).name);
+  const categoryMappings = {};
+  try {
+    for (const m of await listCategoryMappings(siteType)) {
+      categoryMappings[`${m.source_category}||${m.source_subcategory || ''}`] = {
+        term_id: m.main_term_id,
+        name: m.main_term_name,
+      };
+    }
+  } catch {
+    /* mappings unavailable — fall back to fuzzy match */
+  }
 
   const results = [];
   for (const id of productIds) {
@@ -62,6 +245,8 @@ async function buildBatch(body) {
         marketplaceKey: marketplace,
         seller,
         country: country || '',
+        defaultCurrency: currencyByProfile[product.profile_file_name],
+        categoryMappings,
         overrides: overrides[id] || overrides[String(id)] || {},
       }),
     );

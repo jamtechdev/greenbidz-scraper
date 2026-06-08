@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileCode2, Play, Plus, Settings2, AlertCircle, PauseCircle } from 'lucide-react';
+import { FileCode2, Play, Plus, Settings2, AlertCircle, PauseCircle, Tags } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
@@ -12,12 +12,14 @@ import { useScrapeLock, formatRemaining } from '@/hooks/useScrapeLock';
 import type { ProfileListItem } from '@/types/api';
 import { timeAgo, timeUntil } from '@/lib/format';
 import { ProfileSettingsDrawer } from './ProfileSettingsDrawer';
+import { CategoryMappingModal } from '@/features/sync/CategoryMappingModal';
 
 export function ProfilesPage() {
   const navigate = useNavigate();
   const { data, isLoading, isError, error, refetch } = useProfiles();
   const profiles = data?.profiles ?? [];
   const [selected, setSelected] = useState<ProfileListItem | null>(null);
+  const [catMapFor, setCatMapFor] = useState<string | null>(null);
 
   return (
     <>
@@ -54,7 +56,12 @@ export function ProfilesPage() {
               </THead>
               <TBody>
                 {profiles.map((p) => (
-                  <ProfileRow key={p.fileName} profile={p} onOpen={() => setSelected(p)} />
+                  <ProfileRow
+                    key={p.fileName}
+                    profile={p}
+                    onOpen={() => setSelected(p)}
+                    onMapCategories={() => setCatMapFor(p.fileName)}
+                  />
                 ))}
               </TBody>
             </Table>
@@ -63,11 +70,25 @@ export function ProfilesPage() {
       </Card>
 
       <ProfileSettingsDrawer profile={selected} onClose={() => setSelected(null)} />
+
+      <CategoryMappingModal
+        open={catMapFor != null}
+        onClose={() => setCatMapFor(null)}
+        profile={catMapFor ?? undefined}
+      />
     </>
   );
 }
 
-function ProfileRow({ profile: p, onOpen }: { profile: ProfileListItem; onOpen: () => void }) {
+function ProfileRow({
+  profile: p,
+  onOpen,
+  onMapCategories,
+}: {
+  profile: ProfileListItem;
+  onOpen: () => void;
+  onMapCategories: () => void;
+}) {
   const run = useRunProfile();
   const { locked, remainingMs, lock } = useScrapeLock(p.fileName);
   const canRun = p.listingUrls.length > 0 && !locked;
@@ -137,6 +158,18 @@ function ProfileRow({ profile: p, onOpen }: { profile: ProfileListItem; onOpen: 
             }
           >
             {locked ? `Scraping… ${formatRemaining(remainingMs)}` : 'Scrape new'}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            icon={<Tags className="h-3.5 w-3.5" />}
+            onClick={(e) => {
+              e.stopPropagation();
+              onMapCategories();
+            }}
+            title="Map this profile's categories to the main site"
+          >
+            Categories
           </Button>
           <Button
             size="sm"

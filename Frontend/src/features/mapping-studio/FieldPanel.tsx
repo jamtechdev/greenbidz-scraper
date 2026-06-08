@@ -14,7 +14,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import type { FieldDraft, FieldType, ImagePick, MappingDraft } from './types';
-import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY } from './types';
+import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY, CURRENCY_OPTIONS } from './types';
 
 interface PanelProps {
   mode: 'listing' | 'fields';
@@ -27,6 +27,7 @@ interface PanelProps {
   onToggleRequired: (key: string) => void;
   onSetType: (key: string, type: FieldType) => void;
   onRemoveImage: (index: number) => void;
+  onSetCurrency: (currency: string) => void;
   countMatches: (selector: string) => number;
 }
 
@@ -86,6 +87,7 @@ function FieldsPanel({
   onToggleRequired,
   onSetType,
   onRemoveImage,
+  onSetCurrency,
   countMatches,
 }: PanelProps) {
   const [custom, setCustom] = useState('');
@@ -93,8 +95,25 @@ function FieldsPanel({
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted">
-        Click a field, then click the matching element on the product page.
+        Click a field, then click the matching element on the product page. Only
+        <b className="text-ink"> Title</b> is required — the rest are optional.
       </p>
+
+      {/* Profile-level price currency (a fixed value, not picked from the page) */}
+      <div className="flex items-center justify-between gap-2 rounded-lg border border-line bg-panel2/50 p-3">
+        <div className="text-sm font-medium text-ink">Price currency</div>
+        <select
+          className="rounded border border-line bg-bg px-2 py-1 text-sm text-ink"
+          value={draft.priceCurrency}
+          onChange={(e) => onSetCurrency(e.target.value)}
+        >
+          {CURRENCY_OPTIONS.map((c) => (
+            <option key={c} value={c}>
+              {c}
+            </option>
+          ))}
+        </select>
+      </div>
 
       {draft.fields.map((f) => (
         <FieldRow

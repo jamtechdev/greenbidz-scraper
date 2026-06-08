@@ -83,55 +83,85 @@ async function collectProductUrls(page, linkSelector, urlPattern) {
 }
 
 /**
- * Attempt to click the "Next" control. Returns true if navigation to a new
- * page happened, false if there is no next page.
+ * Advance to the next listing page. Returns true if we moved to a NEW page.
+ *
+ * Strategy: prefer the standard `a[rel="next"]` link (falling back to the
+ * profile's nextSelector). If the chosen control is an anchor with an href,
+ * navigate to it DIRECTLY (deterministic for `?page=N` pagination — avoids
+ * position-based selectors matching the wrong link on later pages). Only when
+ * there's no usable href do we click (SPA content-swap). A target that is the
+ * current/already-visited URL means we've reached the last page.
+ *
  * @param {import('puppeteer').Page} page
  * @param {string} nextSelector
  * @param {string} [waitForSelector]
+ * @param {Set<string>} [visited]
  * @returns {Promise<boolean>}
  */
-async function goToNextPage(page, nextSelector, waitForSelector) {
-  const next = await page.$(nextSelector);
-  if (!next) return false;
+async function goToNextPage(page, nextSelector, waitForSelector, visited = new Set()) {
+  const beforeUrl = page.url();
 
-  // Determine whether the control is actually clickable/enabled.
-  const clickable = await page.evaluate((el) => {
+  // Slow listings render their pagination block late — wait for a pagination
+  // control to appear before deciding there's no next page (fixes intermittent
+  // "stops after page 1"). Resolves fast once the block is present; on the last
+  // page it simply waits out the short timeout.
+  await page.waitForSelector(`a[rel="next"], ${nextSelector}`, { timeout: 15000 }).catch(() => {});
+
+  // Find the next control (rel="next" first, then the profile selector) and,
+  // if it's a link, resolve its absolute href.
+  const next = await page.evaluate((sel) => {
+    const el = document.querySelector('a[rel="next"]') || document.querySelector(sel);
+    if (!el) return null;
     const disabled =
       el.getAttribute('aria-disabled') === 'true' ||
       el.classList.contains('disabled') ||
+      el.closest('.disabled, [aria-disabled="true"]') != null ||
       el.hasAttribute('disabled');
-    return !disabled;
-  }, next);
-  if (!clickable) return false;
+    if (disabled) return null;
+    return { href: el.tagName === 'A' ? el.href : null };
+  }, nextSelector);
 
-  const beforeUrl = page.url();
+  if (!next) return false;
 
+  // ── URL-based pagination: navigate straight to the next page's URL ──
+  if (next.href) {
+    if (next.href === beforeUrl || visited.has(next.href)) return false; // last page
+    // Fire navigation without blocking on the (slow) full lifecycle; wait for
+    // the document URL to actually change, then for the product content.
+    page
+      .goto(next.href, { waitUntil: 'domcontentloaded', timeout: CONSTANTS.PAGE_TIMEOUT_MS })
+      .catch(() => {});
+    await page
+      .waitForFunction((b) => location.href !== b, { timeout: 20000 }, beforeUrl)
+      .catch(() => {});
+    if (waitForSelector) {
+      await page.waitForSelector(waitForSelector, { timeout: CONSTANTS.PAGE_TIMEOUT_MS }).catch(() => {});
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    return page.url() !== beforeUrl;
+  }
+
+  // ── SPA fallback: no href → click and wait for a content swap ──
+  const handle = (await page.$('a[rel="next"]')) || (await page.$(nextSelector));
+  if (!handle) return false;
   try {
-    // Some sites navigate (SSR), others swap content (SPA). Handle both:
     await Promise.all([
       page
         .waitForNavigation({
           waitUntil: 'domcontentloaded',
-          // Capped: SPA "next" often swaps content without a real navigation,
-          // so don't burn the full page timeout waiting for one that won't come.
           timeout: Math.min(10000, CONSTANTS.PAGE_TIMEOUT_MS),
         })
-        .catch(() => null), // SPA: navigation may not fire
-      next.click(),
+        .catch(() => null),
+      handle.click(),
     ]);
   } catch {
     return false;
   }
-
   if (waitForSelector) {
-    await page
-      .waitForSelector(waitForSelector, { timeout: CONSTANTS.PAGE_TIMEOUT_MS })
-      .catch(() => {});
+    await page.waitForSelector(waitForSelector, { timeout: CONSTANTS.PAGE_TIMEOUT_MS }).catch(() => {});
   }
-  await new Promise((r) => setTimeout(r, 800)); // let content swap
-
-  // If neither URL nor content changed, treat as end of pagination.
-  return page.url() !== beforeUrl || true;
+  await new Promise((r) => setTimeout(r, 800));
+  return page.url() !== beforeUrl;
 }
 
 /**
@@ -207,6 +237,7 @@ export async function crawlListingPage(listingUrl, options = {}) {
         page,
         pagination.nextSelector,
         pagination.waitForSelector,
+        visitedPageUrls,
       );
       if (!advanced) break;
 

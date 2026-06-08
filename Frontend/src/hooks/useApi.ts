@@ -1,4 +1,4 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, type ProductsQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
 import type { ProfileSettings, SyncBatchInput } from '@/types/api';
@@ -14,6 +14,7 @@ export function useProducts(q: ProductsQuery = {}) {
   return useQuery({
     queryKey: queryKeys.products(q),
     queryFn: () => api.getProducts(q),
+    placeholderData: keepPreviousData,
   });
 }
 
@@ -22,6 +23,17 @@ export function useProduct(id: number | null) {
     queryKey: queryKeys.product(id ?? -1),
     queryFn: () => api.getProduct(id as number),
     enabled: id != null,
+  });
+}
+
+export function useDeleteProducts() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (ids: number[]) => api.deleteProducts(ids),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['products'] });
+      qc.invalidateQueries({ queryKey: queryKeys.state });
+    },
   });
 }
 
@@ -88,6 +100,42 @@ export function useDeleteProfile() {
 
 export function useSyncMeta() {
   return useQuery({ queryKey: ['sync-meta'], queryFn: api.getSyncMeta, staleTime: 5 * 60 * 1000 });
+}
+
+export function useSyncCategories(marketplace: string) {
+  return useQuery({
+    queryKey: ['sync-categories', marketplace],
+    queryFn: () => api.getSyncCategories(marketplace),
+    enabled: !!marketplace,
+    staleTime: 5 * 60 * 1000,
+  });
+}
+
+export function useSourceCategories(
+  siteType: string,
+  opts: { profile?: string; productIds?: number[] },
+  enabled: boolean,
+) {
+  return useQuery({
+    queryKey: ['source-categories', siteType, opts.profile ?? '', (opts.productIds ?? []).join(',')],
+    queryFn: () => api.getSourceCategories(siteType, opts),
+    enabled: enabled && !!siteType,
+  });
+}
+
+export function useSaveCategoryMappings() {
+  return useMutation({
+    mutationFn: (body: Parameters<typeof api.saveCategoryMappings>[0]) => api.saveCategoryMappings(body),
+  });
+}
+
+export function useSyncSellers(search: string) {
+  return useQuery({
+    queryKey: ['sync-sellers', search],
+    queryFn: () => api.getSyncSellers({ search, limit: 20 }),
+    placeholderData: keepPreviousData,
+    staleTime: 60 * 1000,
+  });
 }
 
 export function usePreviewSync() {

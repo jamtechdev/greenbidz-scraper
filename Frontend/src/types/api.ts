@@ -47,12 +47,16 @@ export interface Product {
   profile_file_name: string | null;
   title: string | null;
   price: number | string | null;
+  /** Currency for `price`, derived from the product's profile (default USD). */
+  price_currency?: string;
   scraped: boolean;
   scraped_at: string | null;
   first_seen_at: string;
   last_seen_at: string;
   is_active: boolean;
   images_local_paths: string[];
+  /** Backend-served URLs for locally-downloaded images (/downloads/...). */
+  images_local_urls?: string[];
   images_remote_urls: string[];
   last_error: string | null;
   /** Set once the product has been synced to the main site. */
@@ -67,6 +71,8 @@ export interface Product {
 
 export interface ProductsResponse {
   counts: ProductCounts;
+  /** Total products matching the current filter (for pagination). */
+  total?: number;
   products: Product[];
 }
 
@@ -75,6 +81,7 @@ export interface CrawlRun {
   listing_url: string;
   products_found: number | null;
   new_products: number | null;
+  scraped_products: number | null;
   failed_products: number | null;
   crawl_duration_seconds: number | null;
   status: string | null;
@@ -158,9 +165,15 @@ export interface SyncMarketplace {
 }
 export interface SyncSeller {
   id: number;
-  username: string;
-  email: string;
   displayName: string;
+  email?: string;
+  username?: string;
+  totalListings?: number;
+  currency?: string;
+}
+export interface SyncSellersResponse {
+  sellers: SyncSeller[];
+  pagination: { page: number; limit: number; total: number; totalPages: number } | null;
 }
 export interface SyncMeta {
   marketplaces: SyncMarketplace[];
@@ -183,9 +196,27 @@ export interface SyncPreviewItem {
   } | null;
   categoryMatched: boolean;
   autoMatched: boolean;
+  fromMapping?: boolean;
+  scrapedCategory?: string | null;
+  scrapedSubcategory?: string | null;
   missing: string[];
   syncable: boolean;
   error?: string;
+}
+export interface SyncCategoriesResponse {
+  categories: SyncCategory[];
+  source: 'api' | 'config';
+  siteType: string;
+}
+export interface SyncSourceCategory {
+  source_category: string;
+  source_subcategory: string;
+  main_term_id: number | null;
+  main_term_name: string | null;
+}
+export interface SyncSourceCategoriesResponse {
+  siteType: string;
+  items: SyncSourceCategory[];
 }
 export interface SyncPreviewResponse {
   marketplace: string;
@@ -201,6 +232,7 @@ export interface SyncBatchInput {
   productIds: number[];
   marketplace: string;
   sellerId: number;
+  sellerName?: string;
   country: string;
   overrides?: Record<string, Record<string, unknown>>;
 }
@@ -276,6 +308,8 @@ export interface DomProfile {
   scrapeMode: ScrapeMode;
   /** Max NEW products to scrape per run (null = no cap). */
   scrapeLimit: number | null;
+  /** Profile-level currency for prices (optional). */
+  priceCurrency?: string;
   listingUrls: string[];
   pagination: {
     productLinkSelector?: string;

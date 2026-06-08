@@ -11,6 +11,7 @@ export const CrawlHistory = sequelize.define(
     listing_url: { type: DataTypes.TEXT, allowNull: false },
     products_found: { type: DataTypes.INTEGER, allowNull: true },
     new_products: { type: DataTypes.INTEGER, allowNull: true },
+    scraped_products: { type: DataTypes.INTEGER, allowNull: true },
     failed_products: { type: DataTypes.INTEGER, allowNull: true },
     crawl_duration_seconds: { type: DataTypes.INTEGER, allowNull: true },
     status: { type: DataTypes.STRING(50), allowNull: true },

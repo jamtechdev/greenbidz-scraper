@@ -79,15 +79,25 @@ export interface MappingDraft {
   scrapeMode: ScrapeMode;
   /** Max new products to scrape per run (null = All / no cap). */
   scrapeLimit: number | null;
+  /** Profile-level currency for prices (not a DOM-picked field). */
+  priceCurrency: string;
 }
 
 export const BUILTIN_FIELDS: FieldDraft[] = [
   { key: 'title', label: 'Title', type: 'text', required: true, builtin: true },
   { key: 'price', label: 'Price', type: 'text', required: false, builtin: true },
   { key: 'description', label: 'Description', type: 'html', required: false, builtin: true },
+  { key: 'manufacturer', label: 'Manufacturer', type: 'text', required: false, builtin: true },
   { key: 'model', label: 'Model', type: 'text', required: false, builtin: true },
-  { key: 'serial', label: 'Serial number', type: 'text', required: false, builtin: true },
+  { key: 'year', label: 'Year', type: 'text', required: false, builtin: true },
+  { key: 'condition', label: 'Condition', type: 'text', required: false, builtin: true },
+  { key: 'serial', label: 'Serial Number', type: 'text', required: false, builtin: true },
+  { key: 'category', label: 'Category', type: 'text', required: false, builtin: true },
+  { key: 'subcategory', label: 'Subcategories', type: 'text', required: false, builtin: true },
 ];
+
+/** Currency options for the profile-level price currency dropdown. */
+export const CURRENCY_OPTIONS = ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY'];
 
 export function emptyDraft(): MappingDraft {
   return {
@@ -101,6 +111,7 @@ export function emptyDraft(): MappingDraft {
     downloadImages: true,
     scrapeMode: 'auto',
     scrapeLimit: 20,
+    priceCurrency: 'USD',
   };
 }
 
@@ -238,6 +249,7 @@ export function buildProfile(draft: MappingDraft, now: string): DomProfile {
     downloadImages: draft.downloadImages,
     scrapeMode: draft.scrapeMode,
     scrapeLimit: draft.scrapeLimit,
+    priceCurrency: draft.priceCurrency,
     listingUrls: draft.listingUrl ? [draft.listingUrl] : [],
     pagination: {
       ...(draft.productLinkSelector ? { productLinkSelector: draft.productLinkSelector } : {}),

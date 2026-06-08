@@ -6,8 +6,16 @@ import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
-import { useSyncMeta, usePreviewSync, useSubmitSync } from '@/hooks/useApi';
+import { Modal } from '@/components/ui/Modal';
+import { useSyncMeta, useSyncSellers, useSyncCategories, usePreviewSync, useSubmitSync } from '@/hooks/useApi';
 import type { SyncCategory } from '@/types/api';
+import { CategoryMappingModal } from './CategoryMappingModal';
+
+/** Friendly labels for the condition codes the main API expects. */
+const CONDITION_LABELS: Record<string, string> = {
+  new: 'New',
+  usedFunctional: 'Used',
+};
 
 interface Form {
   product_title: string;
@@ -26,15 +34,23 @@ interface Form {
 }
 
 /**
- * Resolve the WP term id to send: the subcategory id when the chosen category
- * has subcategories (one must be picked), otherwise the category id itself.
- * Returns '' when not yet resolvable.
+ * Resolve the WP term id to send: the subcategory id if one is chosen, else the
+ * category id. Category is required; subcategory is OPTIONAL — a category with
+ * no chosen subcategory maps to the category itself.
  */
-function effectiveTermId(f: Form, categories: SyncCategory[]): number | '' {
+function effectiveTermId(f: Form): number | '' {
   if (f.categoryId === '') return '';
+  return f.subcategoryId !== '' ? f.subcategoryId : f.categoryId;
+}
+
+/** Name of the effective (leaf) category, for sending to the main API. */
+function effectiveCategoryName(f: Form, categories: SyncCategory[]): string {
   const cat = categories.find((c) => c.id === f.categoryId);
-  if (cat && cat.subcategories.length) return f.subcategoryId === '' ? '' : f.subcategoryId;
-  return f.categoryId;
+  if (!cat) return '';
+  if (cat.subcategories.length && f.subcategoryId !== '') {
+    return cat.subcategories.find((s) => s.id === f.subcategoryId)?.name || cat.name;
+  }
+  return cat.name;
 }
 
 export function SyncPage() {
@@ -55,22 +71,37 @@ export function SyncPage() {
 
   const [marketplace, setMarketplace] = useState('');
   const [sellerId, setSellerId] = useState<number | null>(null);
+  const [sellerName, setSellerName] = useState('');
+  const [sellerSearchInput, setSellerSearchInput] = useState('');
+  const [sellerSearch, setSellerSearch] = useState('');
   const [country, setCountry] = useState('Taiwan');
   const [forms, setForms] = useState<Record<number, Form>>({});
 
-  // Default prereqs once meta loads.
+  // Sellers are loaded from the main site (searchable, server-side).
   useEffect(() => {
-    if (!meta.data) return;
-    setMarketplace((m) => m || meta.data.marketplaces[0]?.name || '');
-    setSellerId((s) => (s == null ? (meta.data.sellers[0]?.id ?? null) : s));
+    const t = setTimeout(() => setSellerSearch(sellerSearchInput.trim()), 300);
+    return () => clearTimeout(t);
+  }, [sellerSearchInput]);
+  const sellersQ = useSyncSellers(sellerSearch);
+  const sellers = sellersQ.data?.sellers ?? [];
+
+  // Default marketplace once meta loads; default seller to the first loaded one.
+  useEffect(() => {
+    if (meta.data) setMarketplace((m) => m || meta.data.marketplaces[0]?.name || '');
   }, [meta.data]);
+  useEffect(() => {
+    if (sellerId == null && sellers.length) {
+      setSellerId(sellers[0].id);
+      setSellerName(sellers[0].displayName);
+    }
+  }, [sellers, sellerId]);
 
   // (Re)run preview when the batch or marketplace/seller changes.
   const previewMutate = preview.mutate;
   useEffect(() => {
     if (!productIds.length || !marketplace || sellerId == null) return;
-    previewMutate({ productIds, marketplace, sellerId, country, overrides: {} });
-    // country intentionally excluded — it only seeds the location default
+    previewMutate({ productIds, marketplace, sellerId, sellerName, country, overrides: {} });
+    // country/sellerName intentionally excluded from deps — they don't change mapping
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [marketplace, sellerId, productIds.join(',')]);
 
@@ -114,9 +145,20 @@ export function SyncPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [previewData]);
 
-  const mp = meta.data?.marketplaces.find((m) => m.name === marketplace);
-  const categories: SyncCategory[] = mp?.categories ?? [];
+  // Categories load from the live API by site_type (config fallback handled
+  // server-side). Re-fetches when the marketplace changes.
+  const catsQ = useSyncCategories(marketplace);
+  const categories: SyncCategory[] = catsQ.data?.categories ?? [];
   const enums = meta.data?.enums ?? {};
+  const [addCatFor, setAddCatFor] = useState<number | null>(null);
+  const [showCatMap, setShowCatMap] = useState(false);
+
+  // Re-run the mapping preview (e.g. after saving category mappings).
+  const rerunPreview = () => {
+    if (productIds.length && marketplace && sellerId != null) {
+      previewMutate({ productIds, marketplace, sellerId, sellerName, country, overrides: {} });
+    }
+  };
 
   const setField = (id: number, key: keyof Form, val: string | number) =>
     setForms((prev) => ({ ...prev, [id]: { ...prev[id], [key]: val } }));
@@ -126,7 +168,7 @@ export function SyncPage() {
     setForms((prev) => ({ ...prev, [id]: { ...prev[id], categoryId: catId, subcategoryId: '' } }));
 
   const isReady = (f?: Form) =>
-    !!f && effectiveTermId(f, categories) !== '' && String(f.price_per_unit).trim() !== '';
+    !!f && effectiveTermId(f) !== '' && String(f.price_per_unit).trim() !== '';
 
   const readyIds = productIds.filter((id) => isReady(forms[id]));
 
@@ -138,7 +180,8 @@ export function SyncPage() {
         product_title: f.product_title,
         product_content: f.product_content,
         price_per_unit: f.price_per_unit,
-        categoryId: effectiveTermId(f, categories),
+        categoryId: effectiveTermId(f),
+        categoryName: effectiveCategoryName(f, categories),
         item_condition: f.item_condition || undefined,
         item_grade: f.item_grade || undefined,
         operation_status: f.operation_status || undefined,
@@ -149,7 +192,7 @@ export function SyncPage() {
         price_currency: f.price_currency,
       };
     }
-    submit.mutate({ productIds: readyIds, marketplace, sellerId: sellerId as number, country, overrides });
+    submit.mutate({ productIds: readyIds, marketplace, sellerId: sellerId as number, sellerName, country, overrides });
   };
 
   if (!productIds.length) {
@@ -204,24 +247,51 @@ export function SyncPage() {
               ))}
             </select>
           </Field>
-          <Field label="Seller">
+          <Field label="Seller (from main site)">
+            <input
+              className="input mb-2"
+              placeholder="Search sellers by name / email…"
+              value={sellerSearchInput}
+              onChange={(e) => setSellerSearchInput(e.target.value)}
+            />
             <select
               className="input"
               value={sellerId ?? ''}
-              onChange={(e) => setSellerId(Number(e.target.value))}
+              onChange={(e) => {
+                const id = Number(e.target.value);
+                setSellerId(id);
+                setSellerName(sellers.find((s) => s.id === id)?.displayName ?? '');
+              }}
             >
-              {meta.data!.sellers.map((s) => (
+              {sellerId != null && !sellers.some((s) => s.id === sellerId) && (
+                <option value={sellerId}>{sellerName || `Seller #${sellerId}`}</option>
+              )}
+              {sellers.map((s) => (
                 <option key={s.id} value={s.id}>
                   {s.displayName} (#{s.id})
+                  {s.totalListings != null ? ` · ${s.totalListings} listings` : ''}
                 </option>
               ))}
             </select>
+            <p className="mt-1 text-[11px] text-muted">
+              {sellersQ.isFetching ? 'Loading sellers…' : `${sellers.length} shown${sellersQ.data?.pagination ? ` of ${sellersQ.data.pagination.total}` : ''}`}
+            </p>
           </Field>
           <Field label="Country">
             <input className="input" value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Taiwan" />
           </Field>
         </CardBody>
       </Card>
+
+      {/* Category mapping entry point */}
+      <div className="mt-3 flex flex-wrap items-center gap-3">
+        <Button variant="secondary" size="sm" onClick={() => setShowCatMap(true)}>
+          Set category mapping
+        </Button>
+        <span className="text-xs text-muted">
+          Map this site’s scraped categories → main-site categories once, so they auto-select.
+        </span>
+      </div>
 
       {/* Preview / mapping */}
       {preview.isPending ? (
@@ -234,6 +304,7 @@ export function SyncPage() {
         </div>
       ) : (
         <div className="mt-4 space-y-4">
+          {catsQ.isLoading && <p className="text-xs text-muted">Loading categories…</p>}
           {results.map((r) => {
             const f = forms[r.productId];
             if (r.error || !f) {
@@ -250,7 +321,6 @@ export function SyncPage() {
             const selCat = categories.find((c) => c.id === f.categoryId);
             const subs = selCat?.subcategories ?? [];
             const topMissing = f.categoryId === '';
-            const subMissing = subs.length > 0 && f.subcategoryId === '';
             return (
               <Card key={r.productId}>
                 <CardBody className="space-y-3">
@@ -278,6 +348,20 @@ export function SyncPage() {
                     </Badge>
                   </div>
 
+                  {/* Scraped category that didn't match the main-site list */}
+                  {r.scrapedCategory && !r.autoMatched && (
+                    <div className="flex flex-wrap items-center gap-2 rounded-lg border border-warn/40 bg-amber-900/20 p-2.5 text-xs text-amber-200">
+                      <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                      <span>
+                        Scraped category <b>“{r.scrapedSubcategory || r.scrapedCategory}”</b> isn’t in
+                        the main-site list — pick one below to map it, or ask us to add it if it’s missing.
+                      </span>
+                      {/* <Button size="sm" variant="secondary" onClick={() => setAddCatFor(r.productId)}>
+                        Add to main DB
+                      </Button> */}
+                    </div>
+                  )}
+
                   {/* Fields grid */}
                   <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
                     <Field label="Category *" warn={topMissing}>
@@ -295,11 +379,13 @@ export function SyncPage() {
                           </option>
                         ))}
                       </select>
-                      {r.autoMatched && effectiveTermId(f, categories) === r.category?.term_id && (
-                        <p className="mt-1 text-[11px] text-accent">auto-matched · confirm or change</p>
+                      {r.autoMatched && effectiveTermId(f) === r.category?.term_id && (
+                        <p className="mt-1 text-[11px] text-accent">
+                          {r.fromMapping ? 'from category mapping · confirm or change' : 'auto-matched · confirm or change'}
+                        </p>
                       )}
                     </Field>
-                    <Field label={subs.length ? 'Subcategory *' : 'Subcategory'} warn={subMissing}>
+                    <Field label="Subcategory">
                       <select
                         className="input disabled:opacity-50"
                         value={f.subcategoryId}
@@ -308,7 +394,7 @@ export function SyncPage() {
                           setField(r.productId, 'subcategoryId', e.target.value ? Number(e.target.value) : '')
                         }
                       >
-                        <option value="">{subs.length ? '— select —' : '— none —'}</option>
+                        <option value="">{subs.length ? '— (use category) —' : '— none —'}</option>
                         {subs.map((s) => (
                           <option key={s.id} value={s.id}>
                             {s.name}
@@ -329,7 +415,7 @@ export function SyncPage() {
                       <SelectEnum value={f.price_currency} opts={enums.price_currency} onChange={(v) => setField(r.productId, 'price_currency', v)} />
                     </Field>
                     <Field label="Condition">
-                      <SelectEnum value={f.item_condition} opts={enums.item_condition} onChange={(v) => setField(r.productId, 'item_condition', v)} allowEmpty />
+                      <SelectEnum value={f.item_condition} opts={enums.item_condition} labels={CONDITION_LABELS} onChange={(v) => setField(r.productId, 'item_condition', v)} allowEmpty />
                     </Field>
                     <Field label="Grade">
                       <SelectEnum value={f.item_grade} opts={enums.item_grade} onChange={(v) => setField(r.productId, 'item_grade', v)} allowEmpty />
@@ -386,6 +472,29 @@ export function SyncPage() {
           )}
         </div>
       </div>
+
+      {/* "Add category to main DB" — placeholder (feature coming soon) */}
+      <Modal
+        open={addCatFor != null}
+        onClose={() => setAddCatFor(null)}
+        title="Add category to main site"
+        footer={
+          <Button size="sm" onClick={() => setAddCatFor(null)}>
+            Got it
+          </Button>
+        }
+      >
+        Adding new categories to the main site is <b className="text-ink">coming soon</b>. For now,
+        please pick the closest existing category from the dropdown on the product.
+      </Modal>
+
+      <CategoryMappingModal
+        open={showCatMap}
+        onClose={() => setShowCatMap(false)}
+        marketplace={marketplace}
+        productIds={productIds}
+        onSaved={rerunPreview}
+      />
     </>
   );
 }
@@ -412,18 +521,21 @@ function SelectEnum({
   opts,
   onChange,
   allowEmpty,
+  labels,
 }: {
   value: string;
   opts?: string[];
   onChange: (v: string) => void;
   allowEmpty?: boolean;
+  /** Optional value→display-label map (e.g. usedFunctional → "Used"). */
+  labels?: Record<string, string>;
 }) {
   return (
     <select className="input" value={value} onChange={(e) => onChange(e.target.value)}>
       {allowEmpty && <option value="">—</option>}
       {(opts ?? []).map((o) => (
         <option key={o} value={o}>
-          {o}
+          {labels?.[o] ?? o}
         </option>
       ))}
     </select>

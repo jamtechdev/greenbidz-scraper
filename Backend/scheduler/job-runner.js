@@ -3,13 +3,16 @@
  * @description The crawl pipeline + the recurring scheduler.
  *
  * Pipeline (per listing URL):
- *   1. Crawl the listing (DOM with pagination, or the API) -> all products.
- *   2. Record EVERY discovered product in products as a stub (new rows -> scraped = FALSE).
- *   3. Select which to scrape, gated by the ONLY_NEW_PRODUCTS flag:
- *        true  -> only rows with scraped = FALSE (new + previously-failed)
- *        false -> every discovered product (refresh existing too)
+ *   1. Crawl the listing (DOM with pagination, or the API) -> all product URLs.
+ *   2. Record EVERY new product as a DB reference (stub, scraped = FALSE);
+ *      products already in the DB are skipped (no duplicate).
+ *   3. Select which to scrape (recordAndSelect), gated by ONLY_NEW_PRODUCTS:
+ *        true  -> only UNSCRAPED rows (scraped = FALSE), newly-discovered first
+ *                 then the backlog; already-scraped rows are never re-scraped.
+ *        false -> every discovered product (refresh existing too).
+ *      The caller caps the count per run (scrapeLimit); the rest stay queued.
  *   4. For each selected: find matching profile, scrape (with retry),
- *      download images, persist to DB, then flip scraped = TRUE.
+ *      download images, persist to DB, flip scraped = TRUE.
  *   5. If no profile matches: record a pending mapping for review.
  *   6. Log a crawl_history row.
  */
@@ -131,59 +134,68 @@ export async function processProductUrl(url, browser, opts = {}) {
 }
 
 /**
- * Record every discovered product in the queue, then decide which ones to
- * scrape this cycle based on the ONLY_NEW_PRODUCTS flag.
+ * Record discovered products as DB references, then decide which to scrape.
  *
- *   - Always: insert each discovered product (new rows -> scraped = FALSE).
- *   - ONLY_NEW_PRODUCTS = true  -> scrape only rows where scraped = FALSE.
- *   - ONLY_NEW_PRODUCTS = false -> scrape every discovered product.
+ *   - Always crawl all products. For each product NOT already in the DB, insert
+ *     a stub row (scraped = FALSE) as a reference; existing products are skipped
+ *     (no duplicate, never re-recorded).
+ *   - ONLY_NEW_PRODUCTS = true (default): scrape only UNSCRAPED products
+ *     (scraped = FALSE), newly-discovered first then the older backlog. Already
+ *     scraped products (scraped = TRUE) are never re-scraped. The caller caps
+ *     the count per run (scrapeLimit); the rest stay queued for the next run.
+ *   - ONLY_NEW_PRODUCTS = false: re-scrape every discovered product (refresh).
  *
  * @param {Array<{ productUrl: string, externalId?: string }>} discovered
+ * @param {object} [options] - { maxNew }
  * @returns {Promise<{ brandNew: string[], toScrape: Set<string>, mode: string }>}
  */
 export async function recordAndSelect(discovered, options = {}) {
   const { maxNew = Infinity } = options;
-  // Snapshot what was already known so we can report genuinely brand-new finds.
+  // Snapshot what's already in the DB so we only create references for new ones.
   const seenBefore = await getSeenUrls();
-  const brandNew = [];
-  let newRecorded = 0;
-  let skippedByCap = 0;
 
+  const brandNewSet = new Set();
+  const brandNew = [];
+  let skippedByCap = 0;
   for (const d of discovered) {
-    const isNew = !seenBefore.has(d.productUrl);
-    if (isNew) {
-      // Per-profile cap: stop creating NEW rows once the cap is reached.
-      if (newRecorded >= maxNew) {
-        skippedByCap += 1;
-        continue;
-      }
-      newRecorded += 1;
-      brandNew.push(d.productUrl);
+    if (seenBefore.has(d.productUrl) || brandNewSet.has(d.productUrl)) continue; // existing/dupe → skip
+    if (brandNew.length >= maxNew) {
+      skippedByCap += 1;
+      continue;
     }
+    brandNewSet.add(d.productUrl);
+    brandNew.push(d.productUrl);
+    // Create the DB reference (stub, scraped = FALSE).
     // eslint-disable-next-line no-await-in-loop
     await recordDiscoveredProduct(d.productUrl, d.externalId ?? null);
   }
 
   if (skippedByCap > 0) {
-    logger.warn(
-      `Per-profile cap reached — skipped recording ${skippedByCap} new product(s).`,
-    );
+    logger.warn(`Per-profile cap reached — ${skippedByCap} new product(s) not recorded this run.`);
   }
 
   let toScrape;
   if (CONSTANTS.ONLY_NEW_PRODUCTS) {
     const unscraped = await getUnscrapedUrls();
-    toScrape = new Set(
-      discovered.map((d) => d.productUrl).filter((u) => unscraped.has(u)),
-    );
+    // Order: newly-discovered (unscraped) first, then the older backlog still
+    // present on the listing. Set preserves insertion order, so the caller's
+    // per-run limit takes the freshest products first.
+    const ordered = new Set();
+    for (const d of discovered) {
+      if (brandNewSet.has(d.productUrl)) ordered.add(d.productUrl);
+    }
+    for (const d of discovered) {
+      if (!ordered.has(d.productUrl) && unscraped.has(d.productUrl)) ordered.add(d.productUrl);
+    }
+    toScrape = ordered;
   } else {
     toScrape = new Set(discovered.map((d) => d.productUrl));
   }
 
-  const mode = CONSTANTS.ONLY_NEW_PRODUCTS ? 'only-new' : 'all';
+  const mode = CONSTANTS.ONLY_NEW_PRODUCTS ? 'unscraped-only' : 'refresh-all';
   logger.info(
-    `🆕 Discovered ${discovered.length} product(s): ${brandNew.length} brand-new; ` +
-      `${toScrape.size} to scrape (mode: ${mode}).`,
+    `🆕 Discovered ${discovered.length} product(s): ${brandNew.length} new reference(s) added; ` +
+      `${toScrape.size} unscraped to scrape this cycle (mode: ${mode}).`,
   );
   return { brandNew, toScrape, mode };
 }
@@ -291,6 +303,7 @@ export async function runCrawlForListing(listingUrl, options = {}) {
       listingUrl,
       productsFound: found,
       newProducts: newCount,
+      scrapedProducts: scrapedCount,
       failedProducts: failed,
       durationSeconds: duration,
       status: 'completed',
@@ -387,6 +400,7 @@ async function runApiCrawlForListing(listingUrl, apiProfile, start, options = {}
       listingUrl,
       productsFound: found,
       newProducts: newCount,
+      scrapedProducts: scrapedCount,
       failedProducts: failed,
       durationSeconds: duration,
       status: 'completed',

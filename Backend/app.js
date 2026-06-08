@@ -6,6 +6,7 @@ import express from 'express';
 import cors from 'cors';
 import { logger } from './utils/logger.js';
 import { apiRouter } from './routes/index.js';
+import { CONSTANTS } from './config/constants.js';
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
@@ -22,12 +23,16 @@ export function createApp() {
   );
   app.use(express.json({ limit: '5mb' }));
 
+  // Serve locally-downloaded product images (downloads/{domain}/{id}/…) so the
+  // frontend can render them via /downloads/... when downloadImages is on.
+  app.use('/downloads', express.static(CONSTANTS.DOWNLOADS_DIR, { fallthrough: true, maxAge: '1h' }));
+
   // Root: a tiny API banner (the UI lives in the separate Frontend project).
   app.get('/', (req, res) => {
     res.json({
       ok: true,
-      service: 'product-monitor-api',
-      ui: 'Run the Frontend project (Vite) at http://localhost:5173',
+      service: 'greenbidz-scraper-api',
+      ui: 'Frontend - https://greenbidzscraper.onrender.com',
     });
   });
 
