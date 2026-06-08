@@ -9,8 +9,13 @@
 import { createApp } from './app.js';
 import { logger } from './utils/logger.js';
 import { testSequelize } from './config/sequelize.js';
+import { initScheduler } from './scheduler/scheduler-manager.js';
 
 const PORT = Number.parseInt(process.env.WEB_PORT, 10) || 4000;
+
+/** Auto-start the recurring crawl. Default OFF (starts paused) so existing flow
+ *  is unchanged; set SCHEDULER_AUTOSTART=true to have it active on boot. */
+const SCHEDULER_AUTOSTART = /^(true|1|yes)$/i.test(String(process.env.SCHEDULER_AUTOSTART || ''));
 
 const app = createApp();
 
@@ -21,5 +26,12 @@ app.listen(PORT, async () => {
     logger.success('Database connection OK.');
   } catch (err) {
     logger.warn(`DB not reachable yet: ${err.message} (check DB_* env / run "npm run db:migrate")`);
+  }
+  // Register the scheduler (paused by default — never affects the current flow
+  // until an admin resumes it from the Scheduler page or sets SCHEDULER_AUTOSTART).
+  try {
+    initScheduler({ startPaused: !SCHEDULER_AUTOSTART });
+  } catch (err) {
+    logger.warn(`Scheduler init skipped: ${err.message}`);
   }
 });

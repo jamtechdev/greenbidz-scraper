@@ -93,6 +93,40 @@ export interface CrawlHistoryResponse {
   history: CrawlRun[];
 }
 
+// ── Scheduler ────────────────────────────────────────────────────────────────
+export interface SchedulerAutoProfile {
+  fileName: string;
+  profileName: string;
+  domain: string | null;
+  paused: boolean;
+  listingUrlCount: number;
+  scrapeLimit: number | null;
+}
+
+export interface SchedulerSummary {
+  listings: number;
+  new: number;
+  scraped: number;
+  failed: number;
+  found: number;
+  errors: number;
+}
+
+export interface SchedulerStatus {
+  started: boolean;
+  running: boolean; // schedule is active (not paused)
+  paused: boolean;
+  busy: boolean; // a crawl cycle is executing right now
+  intervalHours: number;
+  expression: string;
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+  lastSummary: SchedulerSummary | null;
+  activeProfileCount: number;
+  autoProfiles: SchedulerAutoProfile[];
+}
+
 export interface ProfileListItem {
   fileName: string;
   profileId?: string;

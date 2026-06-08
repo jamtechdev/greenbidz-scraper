@@ -1,9 +1,9 @@
 import { NavLink } from 'react-router-dom';
-import { Satellite } from 'lucide-react';
 import { cn } from '@/lib/cn';
 import { navGroups } from './nav';
 import { useDashboardState } from '@/hooks/useApi';
 import { formatNumber } from '@/lib/format';
+import logoUrl from '@/assets/greenbidz_logo.png';
 
 export function Sidebar({
   open,
@@ -31,13 +31,14 @@ export function Sidebar({
       )}
     >
       {/* Brand */}
-      <div className={cn('flex h-16 items-center gap-3 border-b border-line px-5', collapsed && 'lg:justify-center lg:px-0')}>
-        <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
-          <Satellite className="h-5 w-5" />
+      <div className={cn('flex h-16 items-center justify-center gap-3 border-b border-line px-5', collapsed && 'lg:px-0')}>
+        {/* Collapsed: white chip cropped to the network mark on the left of the logo. */}
+        <div className={cn('hidden h-9 w-9 shrink-0 overflow-hidden rounded-lg bg-white', collapsed ? 'lg:block' : 'lg:hidden')}>
+          <img src={logoUrl} alt="GreenBidz" className="h-full w-auto max-w-none" />
         </div>
-        <div className={cn(collapsed && 'lg:hidden')}>
-          <div className="text-sm font-bold leading-tight text-ink">Product Monitor</div>
-          <div className="text-[11px] text-muted">Scraper Admin</div>
+        {/* Expanded: full logo on a white chip (navy logo needs a light backdrop). */}
+        <div className={cn('flex items-center rounded-lg bg-white px-6 py-1', collapsed && 'lg:hidden')}>
+          <img src={logoUrl} alt="GreenBidz" className="h-10 max-w-full w-auto" />
         </div>
       </div>
 

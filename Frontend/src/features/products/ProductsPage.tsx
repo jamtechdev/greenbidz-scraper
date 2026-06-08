@@ -144,7 +144,7 @@ export function ProductsPage() {
         </div>
 
         <CardBody className="p-0">
-          {isLoading ? (
+          {isLoading || isFetching ? (
             <TableSkeleton rows={8} cols={7} />
           ) : isError ? (
             <ErrorState message={(error as Error).message} onRetry={() => refetch()} />

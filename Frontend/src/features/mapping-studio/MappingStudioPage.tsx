@@ -1,6 +1,19 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, Check, Link as LinkIcon, AlertTriangle, Play, Loader2 } from 'lucide-react';
+import {
+  ArrowLeft,
+  ArrowRight,
+  Check,
+  Link as LinkIcon,
+  AlertTriangle,
+  Play,
+  Loader2,
+  Globe,
+  List,
+  MousePointerClick,
+  ClipboardCheck,
+  type LucideIcon,
+} from 'lucide-react';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
@@ -26,6 +39,15 @@ import {
 } from './types';
 
 const STEPS = ['URLs', 'Listing', 'Fields', 'Review'] as const;
+
+// Display-only metadata for the stepper (icons + one-line descriptions). Kept
+// separate from STEPS so none of the step logic changes.
+const STEP_META: { label: string; desc: string; icon: LucideIcon }[] = [
+  { label: 'URLs', desc: 'Enter the listing page', icon: LinkIcon },
+  { label: 'Listing', desc: 'Pick product link & next', icon: List },
+  { label: 'Fields', desc: 'Map detail fields', icon: MousePointerClick },
+  { label: 'Review', desc: 'Confirm & save profile', icon: ClipboardCheck },
+];
 
 function hostOf(url: string): string {
   try {
@@ -275,6 +297,8 @@ export function MappingStudioPage() {
             matchedProfile={matchedProfile}
             overrideAck={overrideAck}
             onOverride={() => setOverrideAck(true)}
+            onSubmit={goNext}
+            canSubmit={canNext}
           />
         )}
 
@@ -348,32 +372,53 @@ function isHttpUrl(u: string): boolean {
 
 function Stepper({ step }: { step: number }) {
   return (
-    <div className="flex items-center gap-2">
-      {STEPS.map((label, i) => (
-        <div key={label} className="flex items-center gap-2">
-          <div
-            className={cn(
-              'flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-semibold transition-colors',
-              i === step
-                ? 'border-accent bg-accent/15 text-accent'
-                : i < step
-                  ? 'border-line bg-panel2 text-ink'
-                  : 'border-line bg-panel text-muted',
-            )}
-          >
-            <span
+    <div className="flex items-center gap-2 overflow-x-auto pb-1">
+      {STEP_META.map((m, i) => {
+        const done = i < step;
+        const active = i === step;
+        const Icon = m.icon;
+        return (
+          <div key={m.label} className="flex flex-1 items-center gap-2">
+            <div
               className={cn(
-                'flex h-5 w-5 items-center justify-center rounded-full text-[10px]',
-                i < step ? 'bg-accent text-accent-ink' : i === step ? 'bg-accent/30' : 'bg-line/60',
+                'flex flex-1 items-center gap-3 rounded-xl border px-3 py-2.5 transition-colors',
+                active
+                  ? 'border-accent/60 bg-accent/10 shadow-[0_0_0_1px_rgba(34,197,94,0.25)]'
+                  : done
+                    ? 'border-line bg-panel2'
+                    : 'border-line bg-panel',
               )}
             >
-              {i < step ? <Check className="h-3 w-3" /> : i + 1}
-            </span>
-            {label}
+              <span
+                className={cn(
+                  'flex h-8 w-8 shrink-0 items-center justify-center rounded-lg transition-colors',
+                  done
+                    ? 'bg-accent text-accent-ink'
+                    : active
+                      ? 'bg-accent/20 text-accent'
+                      : 'bg-line/50 text-muted',
+                )}
+              >
+                {done ? <Check className="h-4 w-4" /> : <Icon className="h-4 w-4" />}
+              </span>
+              <div className="min-w-0">
+                <div
+                  className={cn(
+                    'text-xs font-semibold',
+                    active ? 'text-accent' : done ? 'text-ink' : 'text-muted',
+                  )}
+                >
+                  {i + 1}. {m.label}
+                </div>
+                <div className="hidden truncate text-[10px] text-muted sm:block">{m.desc}</div>
+              </div>
+            </div>
+            {i < STEP_META.length - 1 && (
+              <div className={cn('h-0.5 w-4 shrink-0 rounded', done ? 'bg-accent' : 'bg-line')} />
+            )}
           </div>
-          {i < STEPS.length - 1 && <div className="h-px w-5 bg-line" />}
-        </div>
-      ))}
+        );
+      })}
     </div>
   );
 }
@@ -384,12 +429,16 @@ function UrlStep({
   matchedProfile,
   overrideAck,
   onOverride,
+  onSubmit,
+  canSubmit,
 }: {
   draft: MappingDraft;
   update: (p: Partial<MappingDraft>) => void;
   matchedProfile: ProfileListItem | null;
   overrideAck: boolean;
   onOverride: () => void;
+  onSubmit: () => void;
+  canSubmit: boolean;
 }) {
   const navigate = useNavigate();
   const run = useRunProfile();
@@ -406,20 +455,43 @@ function UrlStep({
   };
 
   return (
-    <div className="mx-auto max-w-2xl">
-      <div className="card p-6">
-        <div className="mb-4 flex items-center gap-2 text-sm font-semibold text-ink">
-          <LinkIcon className="h-4 w-4 text-sky2" /> Enter the page URLs
+    <div className="mx-auto max-w-2xl space-y-4">
+      <div className="card overflow-hidden">
+        {/* Header band */}
+        <div className="flex items-center gap-3 border-b border-line bg-panel2/40 px-6 py-4">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg bg-accent/15 text-accent">
+            <LinkIcon className="h-5 w-5" />
+          </div>
+          <div>
+            <div className="text-sm font-semibold text-ink">Start a new scraper</div>
+            <div className="text-xs text-muted">
+              Paste the page that lists the products you want to scrape.
+            </div>
+          </div>
         </div>
-        <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">
-          Listing URL (product list) *
-        </label>
-        <input
-          className="input"
-          placeholder="https://101lab.co/buyer-marketplace"
-          value={draft.listingUrl}
-          onChange={(e) => update({ listingUrl: e.target.value })}
-        />
+
+        <div className="p-6">
+          <label className="mb-1.5 block text-[11px] uppercase tracking-wide text-muted">
+            Listing URL (product list) *
+          </label>
+          <div className="relative">
+            <Globe className="pointer-events-none absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted" />
+            <input
+              className="input pl-9"
+              placeholder="https://101lab.co/buyer-marketplace"
+              value={draft.listingUrl}
+              onChange={(e) => update({ listingUrl: e.target.value })}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' && canSubmit) {
+                  e.preventDefault();
+                  onSubmit();
+                }
+              }}
+            />
+          </div>
+          <p className="mt-2 text-[11px] text-muted">
+            Use the page where products are listed and paginated — not a single product page.
+          </p>
 
         {matchedProfile && !overrideAck && (
           <div className="mt-4 rounded-lg border border-warn/40 bg-amber-900/20 p-3">
@@ -457,20 +529,7 @@ function UrlStep({
             Overwriting <code className="font-mono">{matchedProfile.fileName}</code> on save.
           </p>
         )}
-        {/* <label className="mb-1 mt-4 block text-[11px] uppercase tracking-wide text-muted">
-          Sample product URL (optional — auto-filled when you pick a product link)
-        </label>
-        <input
-          className="input"
-          placeholder="https://101lab.co/buyer-marketplace/2473"
-          value={draft.sampleProductUrl}
-          onChange={(e) => update({ sampleProductUrl: e.target.value })}
-        />
-        <p className="mt-4 text-xs text-muted">
-          The listing URL is where products are listed (and paginated). On the next step you'll
-          visually pick a product link and the “Next page” control; then you'll map the detail
-          fields on a sample product page.
-        </p> */}
+        </div>
       </div>
     </div>
   );

@@ -6,4 +6,5 @@ export const queryKeys = {
   product: (id: number) => ['product', id] as const,
   crawlHistory: (limit: number) => ['crawl-history', limit] as const,
   profiles: ['profiles'] as const,
+  scheduler: ['scheduler'] as const,
 };

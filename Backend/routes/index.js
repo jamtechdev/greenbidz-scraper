@@ -8,6 +8,7 @@ import crawlsRoutes from './crawls.routes.js';
 import profilesRoutes from './profiles.routes.js';
 import scrapeRoutes from './scrape.routes.js';
 import syncRoutes from './sync.routes.js';
+import schedulerRoutes from './scheduler.routes.js';
 
 export const apiRouter = Router();
 
@@ -17,5 +18,6 @@ apiRouter.use(crawlsRoutes);
 apiRouter.use(profilesRoutes);
 apiRouter.use(scrapeRoutes);
 apiRouter.use(syncRoutes);
+apiRouter.use(schedulerRoutes);
 
 export default apiRouter;

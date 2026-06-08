@@ -75,6 +75,31 @@ export function useRunProfile() {
   });
 }
 
+// ── Scheduler ───────────────────────────────────────────────────────────────
+
+export function useScheduler() {
+  return useQuery({
+    queryKey: queryKeys.scheduler,
+    queryFn: api.getScheduler,
+    // Poll fast while a crawl is executing, slower otherwise (keeps the
+    // countdown + busy indicator current without hammering the API).
+    refetchInterval: (query) => (query.state.data?.busy ? 4_000 : 15_000),
+  });
+}
+
+export function useSchedulerActions() {
+  const qc = useQueryClient();
+  const onSettled = () => {
+    qc.invalidateQueries({ queryKey: queryKeys.scheduler });
+    qc.invalidateQueries({ queryKey: ['crawl-history'] });
+    qc.invalidateQueries({ queryKey: queryKeys.state });
+  };
+  const runNow = useMutation({ mutationFn: api.runSchedulerNow, onSettled });
+  const pause = useMutation({ mutationFn: api.pauseScheduler, onSettled });
+  const resume = useMutation({ mutationFn: api.resumeScheduler, onSettled });
+  return { runNow, pause, resume };
+}
+
 export function useUpdateProfileSettings() {
   const qc = useQueryClient();
   return useMutation({

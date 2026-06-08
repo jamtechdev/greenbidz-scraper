@@ -31,8 +31,12 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
 
       <div className="flex-1" />
 
-      {/* Backend connection pill */}
-      <div className="flex items-center gap-2 rounded-full border border-line bg-panel px-3 py-1.5 text-xs">
+      {/* Backend status light (red = offline, green = connected) */}
+      <span
+        className="flex items-center rounded-full border border-line bg-panel p-2"
+        title={isError ? 'Backend offline' : 'Backend connected'}
+        aria-label={isError ? 'Backend offline' : 'Backend connected'}
+      >
         <Circle
           className={
             isError
@@ -40,8 +44,7 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
               : 'h-2.5 w-2.5 fill-accent text-accent'
           }
         />
-        <span className="text-muted">{isError ? 'Backend offline' : 'Backend :4000'}</span>
-      </div>
+      </span>
 
       <Button
         variant="secondary"

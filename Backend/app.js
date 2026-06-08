@@ -10,13 +10,18 @@ import { CONSTANTS } from './config/constants.js';
 
 const CORS_ORIGIN = process.env.CORS_ORIGIN || '*';
 
+// Parse multiple CORS origins from comma-separated string
+const corsOrigins = CORS_ORIGIN === '*' 
+  ? '*' 
+  : CORS_ORIGIN.split(',').map(origin => origin.trim());
+
 export function createApp() {
   const app = express();
 
   app.use(
     cors({
-      origin: CORS_ORIGIN,
-      methods: ['GET', 'POST', 'OPTIONS'],
+      origin: corsOrigins,
+      methods: ['GET', 'POST', 'OPTIONS',"PUT", "PATCH", "DELETE"],
       allowedHeaders: ['Content-Type'],
       maxAge: 86400,
     }),

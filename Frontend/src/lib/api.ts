@@ -13,6 +13,7 @@ import type {
   ProfilesResponse,
   RunProfileResponse,
   SaveProfileResponse,
+  SchedulerStatus,
   ScrapeProgressResponse,
   StateResponse,
   SyncBatchInput,
@@ -206,6 +207,15 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // ── Scheduler ───────────────────────────────────────────────────────────────
+  getScheduler: () => request<SchedulerStatus>('/scheduler'),
+
+  runSchedulerNow: () => request<SchedulerStatus>('/scheduler/run', { method: 'POST' }),
+
+  pauseScheduler: () => request<SchedulerStatus>('/scheduler/pause', { method: 'POST' }),
+
+  resumeScheduler: () => request<SchedulerStatus>('/scheduler/resume', { method: 'POST' }),
 
   getScrapeProgress: (id: string) =>
     request<ScrapeProgressResponse>(`/scrape-progress?id=${encodeURIComponent(id)}`),

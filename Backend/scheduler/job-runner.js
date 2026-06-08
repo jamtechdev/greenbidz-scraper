@@ -150,7 +150,7 @@ export async function processProductUrl(url, browser, opts = {}) {
  * @returns {Promise<{ brandNew: string[], toScrape: Set<string>, mode: string }>}
  */
 export async function recordAndSelect(discovered, options = {}) {
-  const { maxNew = Infinity } = options;
+  const { maxNew = Infinity, profileFileName = null } = options;
   // Snapshot what's already in the DB so we only create references for new ones.
   const seenBefore = await getSeenUrls();
 
@@ -165,9 +165,9 @@ export async function recordAndSelect(discovered, options = {}) {
     }
     brandNewSet.add(d.productUrl);
     brandNew.push(d.productUrl);
-    // Create the DB reference (stub, scraped = FALSE).
+    // Create the DB reference (stub, scraped = FALSE), tagged with the owning profile.
     // eslint-disable-next-line no-await-in-loop
-    await recordDiscoveredProduct(d.productUrl, d.externalId ?? null);
+    await recordDiscoveredProduct(d.productUrl, d.externalId ?? null, profileFileName);
   }
 
   if (skippedByCap > 0) {
@@ -215,6 +215,7 @@ export async function checkForNewProducts(listingUrl, options = {}) {
   }));
   const { brandNew, toScrape } = await recordAndSelect(discovered, {
     maxNew: options.maxNew,
+    profileFileName: options.profileFileName ?? null,
   });
   return { allUrls: urls, toScrape, brandNew, pagesVisited };
 }
@@ -267,6 +268,7 @@ export async function runCrawlForListing(listingUrl, options = {}) {
       pagination,
       browser,
       maxNew,
+      profileFileName: domProfile?.fileName ?? null,
     });
     found = allUrls.length;
     newCount = brandNew.length;
@@ -369,7 +371,7 @@ async function runApiCrawlForListing(listingUrl, apiProfile, start, options = {}
     // Record every discovered product (capped), then pick which to scrape by the flag.
     const { brandNew, toScrape } = await recordAndSelect(
       products.map((p) => ({ productUrl: p.productUrl, externalId: p.externalId })),
-      { maxNew },
+      { maxNew, profileFileName: fileName },
     );
     newCount = brandNew.length;
 

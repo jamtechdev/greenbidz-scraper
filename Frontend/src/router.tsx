@@ -5,6 +5,7 @@ import { ProductsPage } from '@/features/products/ProductsPage';
 import { CrawlsPage } from '@/features/crawls/CrawlsPage';
 import { MappingStudioPage } from '@/features/mapping-studio/MappingStudioPage';
 import { ProfilesPage } from '@/features/profiles/ProfilesPage';
+import { SchedulerPage } from '@/features/scheduler/SchedulerPage';
 import { SyncPage } from '@/features/sync/SyncPage';
 import { PlaceholderPage } from '@/features/PlaceholderPage';
 import { RouteError } from '@/components/layout/RouteError';
@@ -41,16 +42,7 @@ export const router = createBrowserRouter([
           />
         ),
       },
-      {
-        path: 'scheduler',
-        element: (
-          <PlaceholderPage
-            title="Scheduler"
-            description="Background crawl scheduler — status, run-now, pause/resume."
-            phase="Phase 3"
-          />
-        ),
-      },
+      { path: 'scheduler', element: <SchedulerPage /> },
       {
         path: 'settings',
         element: (

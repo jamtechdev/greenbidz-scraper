@@ -46,7 +46,7 @@ export const navGroups: NavGroup[] = [
       // { to: '/sources', label: 'Sources', icon: Globe, soon: true },
       { to: '/profiles', label: 'Profiles', icon: FileCode2, badge: 'profiles' },
       // { to: '/pending', label: 'Pending', icon: ClipboardList, soon: true },
-      { to: '/scheduler', label: 'Scheduler', icon: CalendarClock, soon: true },
+      { to: '/scheduler', label: 'Scheduler', icon: CalendarClock },
       { to: '/settings', label: 'Settings', icon: Settings, soon: true },
     ],
   },

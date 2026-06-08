@@ -100,21 +100,26 @@ export async function getUnscrapedUrls() {
 /**
  * Record a discovered product as a stub row (scraped = FALSE) if it does not
  * already exist. Existing rows are left untouched except for last_seen_at.
+ * The owning profile (whose listing discovered it) is recorded so unscraped
+ * stubs can be filtered by profile too; it never overwrites an existing value.
  * @param {string} productUrl
  * @param {string} [externalId]
+ * @param {string} [profileFileName] - Owning profile's file name (optional).
  * @returns {Promise<void>}
  */
-export async function recordDiscoveredProduct(productUrl, externalId = null) {
+export async function recordDiscoveredProduct(productUrl, externalId = null, profileFileName = null) {
   await writeSql(
-    `INSERT INTO products (external_id, product_url, raw_data, scraped)
-     VALUES (?, ?, ?, FALSE)
+    `INSERT INTO products (external_id, product_url, raw_data, scraped, profile_file_name)
+     VALUES (?, ?, ?, FALSE, ?)
      ON DUPLICATE KEY UPDATE
-       last_seen_at = CURRENT_TIMESTAMP,
-       external_id  = COALESCE(VALUES(external_id), external_id)`,
+       last_seen_at      = CURRENT_TIMESTAMP,
+       external_id       = COALESCE(VALUES(external_id), external_id),
+       profile_file_name = COALESCE(profile_file_name, VALUES(profile_file_name))`,
     [
       externalId ?? (productUrl.split('/').filter(Boolean).pop() || productUrl),
       productUrl,
       JSON.stringify({}),
+      profileFileName,
     ],
   );
 }
