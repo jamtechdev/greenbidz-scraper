@@ -10,12 +10,15 @@ import { createApp } from './app.js';
 import { logger } from './utils/logger.js';
 import { testSequelize } from './config/sequelize.js';
 import { initScheduler } from './scheduler/scheduler-manager.js';
+import { initSyncScheduler } from './scheduler/sync-scheduler.js';
 
 const PORT = Number.parseInt(process.env.WEB_PORT, 10) || 4000;
 
 /** Auto-start the recurring crawl. Default OFF (starts paused) so existing flow
  *  is unchanged; set SCHEDULER_AUTOSTART=true to have it active on boot. */
 const SCHEDULER_AUTOSTART = /^(true|1|yes)$/i.test(String(process.env.SCHEDULER_AUTOSTART || ''));
+/** Auto-start the recurring sync. Default OFF; set SYNC_SCHEDULER_AUTOSTART=true. */
+const SYNC_SCHEDULER_AUTOSTART = /^(true|1|yes)$/i.test(String(process.env.SYNC_SCHEDULER_AUTOSTART || ''));
 
 const app = createApp();
 
@@ -33,5 +36,10 @@ app.listen(PORT, async () => {
     initScheduler({ startPaused: !SCHEDULER_AUTOSTART });
   } catch (err) {
     logger.warn(`Scheduler init skipped: ${err.message}`);
+  }
+  try {
+    await initSyncScheduler({ startPaused: !SYNC_SCHEDULER_AUTOSTART });
+  } catch (err) {
+    logger.warn(`Sync scheduler init skipped: ${err.message}`);
   }
 });

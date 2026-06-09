@@ -7,6 +7,7 @@ import { MappingStudioPage } from '@/features/mapping-studio/MappingStudioPage';
 import { ProfilesPage } from '@/features/profiles/ProfilesPage';
 import { SchedulerPage } from '@/features/scheduler/SchedulerPage';
 import { SyncPage } from '@/features/sync/SyncPage';
+import { SyncManagerPage } from '@/features/sync-manager/SyncManagerPage';
 import { PlaceholderPage } from '@/features/PlaceholderPage';
 import { RouteError } from '@/components/layout/RouteError';
 
@@ -20,6 +21,7 @@ export const router = createBrowserRouter([
       { path: 'scraper/new', element: <MappingStudioPage /> },
       { path: 'products', element: <ProductsPage /> },
       { path: 'sync', element: <SyncPage /> },
+      { path: 'sync-manager', element: <SyncManagerPage /> },
       { path: 'crawls', element: <CrawlsPage /> },
       {
         path: 'sources',

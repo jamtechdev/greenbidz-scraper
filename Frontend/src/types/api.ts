@@ -293,6 +293,165 @@ export interface SyncSubmitResponse {
   mainApiResponse: unknown;
 }
 
+// ── Sync Management (background runs + history + scheduler) ──────────────────
+export interface SyncFilters {
+  profile?: string;
+  priceMin?: number | '';
+  priceMax?: number | '';
+  titleContains?: string;
+  onlyUnsynced?: boolean;
+  latestOnly?: boolean;
+  limit?: number;
+}
+
+export interface MappedMainCategory {
+  main_term_id: number;
+  main_term_name: string | null;
+}
+export interface MappedCategoriesResponse {
+  categories: MappedMainCategory[];
+}
+
+export interface SyncCandidatesQuery {
+  profile?: string;
+  priceMin?: number | '';
+  priceMax?: number | '';
+  titleContains?: string;
+  onlyUnsynced?: boolean;
+  latestOnly?: boolean;
+  mainCategory?: number | '';
+  limit?: number | 'all';
+  offset?: number;
+}
+export interface SyncCandidatesResponse {
+  products: Product[];
+  total: number;
+}
+
+export interface SyncRunPreviewResponse extends SyncPreviewResponse {
+  /** Total products matching the filters (may exceed the per-run limit). */
+  matched: number;
+  /** The ids resolved this run (post-limit), in order. */
+  resolvedIds: number[];
+}
+
+export interface SyncRunInput {
+  filters: SyncFilters;
+  marketplace: string;
+  sellerId: number;
+  sellerName?: string;
+  country: string;
+  overrides?: Record<string, Record<string, unknown>>;
+  /** Explicit (admin-edited) id list; overrides filter resolution when present. */
+  productIds?: number[];
+}
+
+export type SyncRunStatus = 'processing' | 'completed' | 'partial' | 'failed' | 'cancelled';
+
+export interface SyncRunSummary {
+  id: number;
+  job_id: string | null;
+  site_type: string;
+  profile: string | null;
+  seller_id: number;
+  seller_name: string | null;
+  country: string | null;
+  filters_json: SyncFilters | null;
+  trigger: 'manual' | 'scheduled' | 'resync';
+  total: number;
+  success_count: number;
+  failed_count: number;
+  status: SyncRunStatus;
+  error_message: string | null;
+  created_at: string;
+  finished_at: string | null;
+  duration_seconds: number | null;
+}
+
+export interface SyncItem {
+  id: number;
+  sync_run_id: number;
+  product_id: number;
+  status: 'success' | 'failed' | 'skipped';
+  main_product_id: number | null;
+  error: string | null;
+  created_at: string;
+  product_title?: string | null;
+  product_url?: string | null;
+}
+
+export interface SyncRunsResponse {
+  runs: SyncRunSummary[];
+  total: number;
+}
+
+export interface SyncRunDetailResponse {
+  run: SyncRunSummary;
+  items: SyncItem[];
+}
+
+export interface ActiveSyncRun {
+  id: number;
+  runId: number;
+  jobId: string | null;
+  siteType: string;
+  profile: string | null;
+  total: number;
+  success: number;
+  failed: number;
+  status: SyncRunStatus;
+  startedAt: string;
+}
+
+export interface ActiveSyncRunsResponse {
+  active: ActiveSyncRun[];
+}
+
+export interface StartSyncRunResponse {
+  ok: boolean;
+  runId: number;
+  jobId: string;
+  total: number;
+}
+
+// Sync scheduler — per-target intervals; the scheduler itself only pauses/resumes.
+export interface SyncSchedulerTarget {
+  profile?: string;
+  marketplace: string;
+  sellerId: number;
+  sellerName?: string;
+  country?: string;
+  filters?: SyncFilters;
+  /** This target's own interval in hours (1/2/5/10/24/120). */
+  intervalHours?: number;
+}
+export interface SyncSchedulerConfig {
+  enabled: boolean;
+  targets: SyncSchedulerTarget[];
+}
+export interface SyncTargetRun {
+  intervalHours: number;
+  lastRunAt: string | null;
+  nextRunAt: string | null;
+}
+export interface SyncSchedulerStatus {
+  started: boolean;
+  running: boolean;
+  paused: boolean;
+  busy: boolean;
+  /** Base poll cron (hourly); each target fires on its own interval. */
+  pollExpression: string;
+  /** Earliest upcoming target run. */
+  nextRunAt: string | null;
+  lastRunAt: string | null;
+  lastError: string | null;
+  /** A scheduler pass just kicks off runs; per-product outcomes show in History. */
+  lastSummary: { runs: number; products: number } | null;
+  config: SyncSchedulerConfig;
+  /** Per-target runtime info, aligned by index with config.targets. */
+  targetRuns: SyncTargetRun[];
+}
+
 export interface RunProfileResponse {
   ok: boolean;
   runStarted: boolean;

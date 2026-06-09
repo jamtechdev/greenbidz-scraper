@@ -8,10 +8,35 @@ import { CrawlHistory } from './crawlHistory.js';
 import { PendingMapping } from './pendingMapping.js';
 import { Profile } from './profile.js';
 import { CategoryMapping } from './categoryMapping.js';
+import { SyncRun } from './syncRun.js';
+import { SyncItem } from './syncItem.js';
+import { SyncSettings } from './syncSettings.js';
 
-// No cross-table associations: products reference a profile loosely by
-// profile_file_name (string), mirroring the prior schema.
+// Products reference a profile loosely by profile_file_name (string). The only
+// cross-table association is sync_runs → sync_items (a run's per-product rows).
+SyncRun.hasMany(SyncItem, { foreignKey: 'sync_run_id', as: 'items', onDelete: 'CASCADE' });
+SyncItem.belongsTo(SyncRun, { foreignKey: 'sync_run_id', as: 'run' });
 
-export { sequelize, Product, CrawlHistory, PendingMapping, Profile, CategoryMapping };
+export {
+  sequelize,
+  Product,
+  CrawlHistory,
+  PendingMapping,
+  Profile,
+  CategoryMapping,
+  SyncRun,
+  SyncItem,
+  SyncSettings,
+};
 
-export default { sequelize, Product, CrawlHistory, PendingMapping, Profile, CategoryMapping };
+export default {
+  sequelize,
+  Product,
+  CrawlHistory,
+  PendingMapping,
+  Profile,
+  CategoryMapping,
+  SyncRun,
+  SyncItem,
+  SyncSettings,
+};

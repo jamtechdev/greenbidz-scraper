@@ -8,4 +8,8 @@ export const queryKeys = {
   activeCrawls: ['active-crawls'] as const,
   profiles: ['profiles'] as const,
   scheduler: ['scheduler'] as const,
+  syncRuns: (f: Record<string, unknown> = {}) => ['sync-runs', f] as const,
+  syncRun: (id: number) => ['sync-run', id] as const,
+  activeSyncRuns: ['active-sync-runs'] as const,
+  syncScheduler: ['sync-scheduler'] as const,
 };

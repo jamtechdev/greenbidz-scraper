@@ -11,7 +11,16 @@
 
 import path from 'node:path';
 import { Op, QueryTypes, literal } from 'sequelize';
-import { sequelize, Product, CrawlHistory, PendingMapping, CategoryMapping } from '../models/index.js';
+import {
+  sequelize,
+  Product,
+  CrawlHistory,
+  PendingMapping,
+  CategoryMapping,
+  SyncRun,
+  SyncItem,
+  SyncSettings,
+} from '../models/index.js';
 import { CONSTANTS } from '../config/constants.js';
 
 /**
@@ -600,6 +609,265 @@ export async function getProductById(id) {
   return row;
 }
 
+// ── Sync runs / items / settings ────────────────────────────────────────────
+
+/**
+ * Resolve which product ids to include in a sync run from filter conditions.
+ * Mirrors listRecentProducts' Sequelize Op usage. Only scraped products are
+ * eligible. Returns ids in the chosen order, plus the unclamped match total.
+ *
+ * @param {object} [opts]
+ * @param {string} [opts.profile]        - profile_file_name to scope to.
+ * @param {number} [opts.priceMin]       - inclusive lower price bound.
+ * @param {number} [opts.priceMax]       - inclusive upper price bound.
+ * @param {string} [opts.titleContains]  - case-insensitive title substring.
+ * @param {boolean} [opts.onlyUnsynced]  - exclude already-synced (default true).
+ * @param {boolean} [opts.latestOnly]    - order by scraped_at DESC (newest first).
+ * @param {number} [opts.limit]          - cap ids returned this run.
+ * @returns {Promise<{ ids: number[], total: number }>}
+ */
+export async function selectProductsForSync({
+  profile,
+  priceMin,
+  priceMax,
+  titleContains,
+  onlyUnsynced = true,
+  latestOnly = false,
+  limit = 100,
+} = {}) {
+  const lim = Math.max(1, Math.min(500, Number(limit) || 100));
+  const where = { scraped: true };
+  if (profile) where.profile_file_name = profile;
+  if (onlyUnsynced) where.synced_at = { [Op.is]: null };
+
+  const priceClause = {};
+  if (priceMin != null && priceMin !== '' && !Number.isNaN(Number(priceMin))) {
+    priceClause[Op.gte] = Number(priceMin);
+  }
+  if (priceMax != null && priceMax !== '' && !Number.isNaN(Number(priceMax))) {
+    priceClause[Op.lte] = Number(priceMax);
+  }
+  if (Object.getOwnPropertySymbols(priceClause).length) where.price = priceClause;
+
+  const q = String(titleContains || '').trim();
+  if (q) where.title = { [Op.like]: `%${q}%` };
+
+  const total = await Product.count({ where });
+  const rows = await Product.findAll({
+    attributes: ['id'],
+    where,
+    order: [[latestOnly ? 'scraped_at' : 'last_seen_at', 'DESC']],
+    limit: lim,
+    raw: true,
+  });
+  return { ids: rows.map((r) => r.id), total };
+}
+
+/** Distinct main-site categories that have at least one saved source mapping. */
+export async function listMappedMainCategories() {
+  return selectSql(
+    `SELECT main_term_id, MAX(main_term_name) AS main_term_name
+     FROM category_mappings
+     GROUP BY main_term_id
+     ORDER BY main_term_name`,
+  );
+}
+
+/**
+ * Build the Sequelize `where` for sync candidate filters. Returns null when the
+ * mainCategory filter resolves to no source categories (i.e. zero matches).
+ * @returns {Promise<object|null>}
+ */
+async function buildSyncCandidateWhere({ profile, priceMin, priceMax, titleContains, onlyUnsynced = true, mainCategory } = {}) {
+  const where = { scraped: true };
+  if (profile) where.profile_file_name = profile;
+  if (onlyUnsynced) where.synced_at = { [Op.is]: null };
+
+  const price = {};
+  if (priceMin != null && priceMin !== '' && !Number.isNaN(Number(priceMin))) price[Op.gte] = Number(priceMin);
+  if (priceMax != null && priceMax !== '' && !Number.isNaN(Number(priceMax))) price[Op.lte] = Number(priceMax);
+  if (Object.getOwnPropertySymbols(price).length) where.price = price;
+
+  const q = String(titleContains || '').trim();
+  if (q) where.title = { [Op.like]: `%${q}%` };
+
+  // Main-category filter: include products whose scraped category is mapped to it.
+  if (mainCategory != null && mainCategory !== '') {
+    const maps = await CategoryMapping.findAll({
+      where: { main_term_id: Number(mainCategory) },
+      attributes: ['source_category'],
+      raw: true,
+    });
+    const cats = [...new Set(maps.map((m) => m.source_category).filter(Boolean))];
+    if (!cats.length) return null;
+    const inList = cats.map((c) => sequelize.escape(c)).join(', ');
+    where[Op.and] = [literal(`JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.category')) IN (${inList})`)];
+  }
+  return where;
+}
+
+/**
+ * All matching product ids for the sync filters (no pagination). Used by the
+ * "select all matches" action. Capped by `limit` (null = All, hard-capped).
+ * @returns {Promise<{ ids: number[], total: number }>}
+ */
+export async function listSyncCandidateIds({
+  profile, priceMin, priceMax, titleContains, onlyUnsynced = true, latestOnly = false, mainCategory, limit = null,
+} = {}) {
+  const where = await buildSyncCandidateWhere({ profile, priceMin, priceMax, titleContains, onlyUnsynced, mainCategory });
+  if (!where) return { ids: [], total: 0 };
+  const matchCount = await Product.count({ where });
+  const cap = limit ? Math.max(0, Number(limit)) : 5000; // safety cap for "All"
+  const rows = await Product.findAll({
+    attributes: ['id'],
+    where,
+    order: [[latestOnly ? 'scraped_at' : 'last_seen_at', 'DESC']],
+    limit: cap,
+    raw: true,
+  });
+  return { ids: rows.map((r) => r.id), total: Math.min(matchCount, cap) };
+}
+
+/**
+ * Full product rows matching the sync filters, paginated. Same row shape as
+ * listRecentProducts. `mainCategory` (a mapped main_term_id) restricts to
+ * products whose scraped category maps to it. `limit` caps the candidate pool
+ * (null = All matching); `offset`/`pageSize` page within that pool.
+ *
+ * @returns {Promise<{ products: object[], total: number }>}
+ */
+export async function listSyncCandidates({
+  profile,
+  priceMin,
+  priceMax,
+  titleContains,
+  onlyUnsynced = true,
+  latestOnly = false,
+  mainCategory,
+  limit = null,
+  offset = 0,
+  pageSize = 50,
+} = {}) {
+  const where = await buildSyncCandidateWhere({ profile, priceMin, priceMax, titleContains, onlyUnsynced, mainCategory });
+  if (!where) return { products: [], total: 0 };
+
+  const matchCount = await Product.count({ where });
+  const total = limit ? Math.min(matchCount, Math.max(0, Number(limit))) : matchCount;
+  const off = Math.max(0, Number(offset) || 0);
+  const take = Math.max(0, Math.min(Number(pageSize) || 50, total - off));
+
+  let rows = [];
+  if (take > 0) {
+    rows = await Product.findAll({
+      attributes: [
+        'id', 'external_id', 'product_url', 'profile_file_name', 'title', 'price',
+        'scraped', 'scraped_at', 'first_seen_at', 'last_seen_at', 'is_active',
+        'images_local_paths', 'images_remote_urls', 'last_error', 'synced_at', 'main_product_id',
+      ],
+      where,
+      order: [[latestOnly ? 'scraped_at' : 'last_seen_at', 'DESC']],
+      limit: take,
+      offset: off,
+      raw: true,
+    });
+  }
+
+  const products = rows.map((r) => ({
+    ...r,
+    scraped: !!r.scraped,
+    is_active: !!r.is_active,
+    synced: !!r.synced_at,
+    images_local_paths: asArray(r.images_local_paths),
+    images_local_urls: toLocalUrls(r.images_local_paths),
+    images_remote_urls: asArray(r.images_remote_urls),
+  }));
+  return { products, total };
+}
+
+/** Create a sync_run row. Returns the created row (plain object). */
+export async function createSyncRun(fields) {
+  const row = await SyncRun.create(fields);
+  return row.get({ plain: true });
+}
+
+/** Patch a sync_run row by id. */
+export async function updateSyncRun(id, patch) {
+  await SyncRun.update(patch, { where: { id } });
+}
+
+/** Bulk-insert sync_item rows. */
+export async function addSyncItems(rows) {
+  if (!Array.isArray(rows) || !rows.length) return 0;
+  const created = await SyncItem.bulkCreate(rows);
+  return created.length;
+}
+
+/**
+ * List sync runs, newest/oldest first, optionally filtered. Paginated.
+ * @param {object} [opts] - { profile, status, order: 'asc'|'desc', limit, offset }
+ * @returns {Promise<{ runs: object[], total: number }>}
+ */
+export async function listSyncRuns({ profile, status, order = 'desc', limit = 50, offset = 0 } = {}) {
+  const lim = Math.max(1, Math.min(200, Number(limit) || 50));
+  const off = Math.max(0, Number(offset) || 0);
+  const where = {};
+  if (profile) where.profile = profile;
+  if (status && status !== 'all') where.status = status;
+  const dir = String(order).toLowerCase() === 'asc' ? 'ASC' : 'DESC';
+  const { rows, count } = await SyncRun.findAndCountAll({
+    where,
+    order: [['created_at', dir]],
+    limit: lim,
+    offset: off,
+    raw: true,
+  });
+  return { runs: rows, total: count };
+}
+
+/** A single sync run with its per-product items. */
+export async function getSyncRunWithItems(id) {
+  const run = await SyncRun.findByPk(id, { raw: true });
+  if (!run) return null;
+  const items = await SyncItem.findAll({
+    where: { sync_run_id: id },
+    order: [['id', 'ASC']],
+    raw: true,
+  });
+  return { run, items };
+}
+
+/** Currently-processing sync runs (durable source of truth for "active"). */
+export async function listActiveSyncRuns() {
+  return SyncRun.findAll({ where: { status: 'processing' }, order: [['created_at', 'DESC']], raw: true });
+}
+
+/** Product ids that failed in a given run (for resync). */
+export async function getFailedProductIds(runId) {
+  const rows = await SyncItem.findAll({
+    where: { sync_run_id: runId, status: 'failed' },
+    attributes: ['product_id'],
+    raw: true,
+  });
+  return rows.map((r) => r.product_id);
+}
+
+/** Read the single sync-settings config row ({} when unset). */
+export async function getSyncSettings() {
+  const row = await SyncSettings.findOne({ order: [['id', 'ASC']], raw: true });
+  return row?.config_json ?? {};
+}
+
+/** Upsert the single sync-settings config row. */
+export async function saveSyncSettings(config) {
+  const existing = await SyncSettings.findOne({ order: [['id', 'ASC']] });
+  if (existing) {
+    await existing.update({ config_json: config, updated_at: literal('CURRENT_TIMESTAMP') });
+  } else {
+    await SyncSettings.create({ config_json: config });
+  }
+  return config;
+}
+
 export default {
   hasSeenProduct,
   getSeenUrls,
@@ -625,4 +893,17 @@ export default {
   countProductsByDomain,
   listCrawlHistory,
   getProductById,
+  selectProductsForSync,
+  listMappedMainCategories,
+  listSyncCandidates,
+  listSyncCandidateIds,
+  createSyncRun,
+  updateSyncRun,
+  addSyncItems,
+  listSyncRuns,
+  getSyncRunWithItems,
+  listActiveSyncRuns,
+  getFailedProductIds,
+  getSyncSettings,
+  saveSyncSettings,
 };

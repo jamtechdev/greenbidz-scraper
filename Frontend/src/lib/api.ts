@@ -24,6 +24,17 @@ import type {
   SyncSellersResponse,
   SyncSourceCategoriesResponse,
   SyncSubmitResponse,
+  SyncRunInput,
+  MappedCategoriesResponse,
+  SyncCandidatesQuery,
+  SyncCandidatesResponse,
+  SyncRunPreviewResponse,
+  StartSyncRunResponse,
+  SyncRunsResponse,
+  SyncRunDetailResponse,
+  ActiveSyncRunsResponse,
+  SyncSchedulerStatus,
+  SyncSchedulerConfig,
   UrlPatternResponse,
 } from '@/types/api';
 
@@ -210,6 +221,70 @@ export const api = {
       method: 'POST',
       body: JSON.stringify(body),
     }),
+
+  // ── Sync Management (background runs + history + scheduler) ────────────────
+  getMappedCategories: () => request<MappedCategoriesResponse>('/sync/mapped-categories'),
+
+  getSyncCandidates: (q: SyncCandidatesQuery = {}) => {
+    const params = new URLSearchParams();
+    if (q.profile) params.set('profile', q.profile);
+    if (q.priceMin !== undefined && q.priceMin !== '') params.set('priceMin', String(q.priceMin));
+    if (q.priceMax !== undefined && q.priceMax !== '') params.set('priceMax', String(q.priceMax));
+    if (q.titleContains) params.set('titleContains', q.titleContains);
+    if (q.onlyUnsynced === false) params.set('onlyUnsynced', 'false');
+    if (q.latestOnly) params.set('latestOnly', 'true');
+    if (q.mainCategory !== undefined && q.mainCategory !== '') params.set('mainCategory', String(q.mainCategory));
+    params.set('limit', q.limit == null ? 'all' : String(q.limit));
+    params.set('offset', String(q.offset ?? 0));
+    return request<SyncCandidatesResponse>(`/sync/candidates?${params.toString()}`);
+  },
+
+  getSyncCandidateIds: (q: SyncCandidatesQuery = {}) => {
+    const params = new URLSearchParams();
+    if (q.profile) params.set('profile', q.profile);
+    if (q.priceMin !== undefined && q.priceMin !== '') params.set('priceMin', String(q.priceMin));
+    if (q.priceMax !== undefined && q.priceMax !== '') params.set('priceMax', String(q.priceMax));
+    if (q.titleContains) params.set('titleContains', q.titleContains);
+    if (q.onlyUnsynced === false) params.set('onlyUnsynced', 'false');
+    if (q.latestOnly) params.set('latestOnly', 'true');
+    if (q.mainCategory !== undefined && q.mainCategory !== '') params.set('mainCategory', String(q.mainCategory));
+    params.set('limit', q.limit == null ? 'all' : String(q.limit));
+    return request<{ ids: number[]; total: number }>(`/sync/candidate-ids?${params.toString()}`);
+  },
+
+  previewSyncRun: (body: SyncRunInput) =>
+    request<SyncRunPreviewResponse>('/sync/run/preview', { method: 'POST', body: JSON.stringify(body) }),
+
+  startSyncRun: (body: SyncRunInput) =>
+    request<StartSyncRunResponse>('/sync/run', { method: 'POST', body: JSON.stringify(body) }),
+
+  getSyncRuns: (q: { profile?: string; status?: string; order?: string; limit?: number; offset?: number } = {}) => {
+    const params = new URLSearchParams();
+    if (q.profile) params.set('profile', q.profile);
+    if (q.status && q.status !== 'all') params.set('status', q.status);
+    if (q.order) params.set('order', q.order);
+    params.set('limit', String(q.limit ?? 50));
+    params.set('offset', String(q.offset ?? 0));
+    return request<SyncRunsResponse>(`/sync/runs?${params.toString()}`);
+  },
+
+  getSyncRun: (id: number) => request<SyncRunDetailResponse>(`/sync/runs/${id}`),
+
+  getActiveSyncRuns: () => request<ActiveSyncRunsResponse>('/sync/active'),
+
+  resyncFailed: (runId: number) =>
+    request<StartSyncRunResponse>(`/sync/runs/${runId}/resync-failed`, { method: 'POST' }),
+
+  cancelSyncRun: (runId: number) =>
+    request<{ ok: boolean }>(`/sync/runs/${runId}/cancel`, { method: 'POST' }),
+
+  // Sync scheduler
+  getSyncScheduler: () => request<SyncSchedulerStatus>('/sync/scheduler'),
+  runSyncSchedulerNow: () => request<SyncSchedulerStatus>('/sync/scheduler/run', { method: 'POST' }),
+  pauseSyncScheduler: () => request<SyncSchedulerStatus>('/sync/scheduler/pause', { method: 'POST' }),
+  resumeSyncScheduler: () => request<SyncSchedulerStatus>('/sync/scheduler/resume', { method: 'POST' }),
+  saveSyncSchedulerConfig: (config: SyncSchedulerConfig) =>
+    request<SyncSchedulerStatus>('/sync/scheduler/config', { method: 'POST', body: JSON.stringify(config) }),
 
   // ── Scheduler ───────────────────────────────────────────────────────────────
   getScheduler: () => request<SchedulerStatus>('/scheduler'),

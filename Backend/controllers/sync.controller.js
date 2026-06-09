@@ -15,6 +15,7 @@ import {
 } from '../database/queries.js';
 import { readAllProfiles } from '../utils/file-manager.js';
 import { mapProduct } from '../services/syncMapper.js';
+import { postGroupedListings } from '../services/syncSender.js';
 import {
   MARKETPLACES,
   SELLERS,
@@ -193,8 +194,9 @@ export function getSyncMeta(req, res) {
   });
 }
 
-/** Load + map the selected products for a batch. Shared by preview & submit. */
-async function buildBatch(body) {
+/** Load + map the selected products for a batch. Shared by preview & submit
+ *  (and by the background sync-job runner). */
+export async function buildBatch(body) {
   const { productIds, marketplace, sellerId, sellerName, country, overrides = {} } = body || {};
   if (!Array.isArray(productIds) || !productIds.length) {
     return { error: 'productIds (non-empty array) required.' };
@@ -289,59 +291,25 @@ export async function submitSync(req, res) {
   }
 
   const siteType = siteTypeFor(batch.marketplace);
-  const productsJson = batch.results.map((r) => r.mapped);
-  const imageUrlsJson = batch.results.map((r) => r.images);
 
-  const fd = new FormData();
-  fd.append('products_json', JSON.stringify(productsJson));
-  fd.append('auction_group_json', JSON.stringify({ country: batch.country }));
-  fd.append('seller_id', String(batch.seller.id));
-  fd.append('country', batch.country);
-  fd.append('visibility', SYNC_DEFAULTS.visibility);
-  fd.append('from_agent', String(SYNC_DEFAULTS.from_agent));
-  fd.append('image_urls_json', JSON.stringify(imageUrlsJson));
-
-  const url = `${MAIN_API_BASE_URL}/api/v1/wp/create-grouped-listings?lang=en`;
-  logger.info(`↗️  Syncing ${productsJson.length} product(s) to main site (${siteType})`);
-
-  let upstream;
-  try {
-    upstream = await fetch(url, {
-      method: 'POST',
-      headers: { 'x-system-key': MAIN_API_SYSTEM_KEY, 'x-platform': siteType },
-      body: fd,
-    });
-  } catch (err) {
-    logger.error(`Main API request failed: ${err.message}`);
-    return res.status(502).json({ error: `Could not reach main API: ${err.message}` });
+  // Delegate the actual POST to the shared sender (identical mechanics).
+  const sent = await postGroupedListings({
+    siteType,
+    results: batch.results,
+    country: batch.country,
+    seller: batch.seller,
+  });
+  if (!sent.ok) {
+    if (sent.status === 0) return res.status(502).json({ error: sent.error });
+    return res.status(502).json({ error: sent.error, status: sent.status, data: sent.data });
   }
 
-  const text = await upstream.text();
-  let data;
-  try {
-    data = JSON.parse(text);
-  } catch {
-    data = { raw: text };
-  }
-  if (!upstream.ok) {
-    logger.warn(`Main API returned ${upstream.status}`);
-    return res.status(502).json({ error: 'Main API rejected the sync.', status: upstream.status, data });
-  }
   // Mark these products as synced so the UI flags them and blocks re-sync.
-  // Map main-site product ids back to ours by the response's `index`.
   const syncedIds = batch.results.map((r) => r.productId);
-  const mainIdByProductId = {};
-  const created = data?.data?.products;
-  if (Array.isArray(created)) {
-    for (const p of created) {
-      const ours = batch.results[p.index]?.productId;
-      if (ours != null && p.product_id != null) mainIdByProductId[ours] = p.product_id;
-    }
-  }
-  await markProductsSynced(syncedIds, mainIdByProductId).catch((err) =>
+  await markProductsSynced(syncedIds, sent.mainIdByProductId).catch((err) =>
     logger.warn(`Could not mark products synced: ${err.message}`),
   );
 
-  logger.success(`Sync OK (${productsJson.length} product(s)).`);
-  res.json({ ok: true, siteType, count: productsJson.length, syncedIds, mainApiResponse: data });
+  logger.success(`Sync OK (${batch.results.length} product(s)).`);
+  res.json({ ok: true, siteType, count: batch.results.length, syncedIds, mainApiResponse: sent.data });
 }

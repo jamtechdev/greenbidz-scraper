@@ -1,7 +1,7 @@
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, type ProductsQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
-import type { ProfileSettings, SyncBatchInput } from '@/types/api';
+import type { ProfileSettings, SyncBatchInput, SyncRunInput, SyncSchedulerConfig } from '@/types/api';
 
 export function useDashboardState() {
   return useQuery({
@@ -198,4 +198,105 @@ export function useSubmitSync() {
       qc.invalidateQueries({ queryKey: queryKeys.state });
     },
   });
+}
+
+// ── Sync Management (background runs + history + scheduler) ──────────────────
+
+export function useMappedCategories() {
+  return useQuery({
+    queryKey: ['mapped-categories'],
+    queryFn: api.getMappedCategories,
+    staleTime: 60 * 1000,
+  });
+}
+
+export function useSyncCandidates(q: import('@/types/api').SyncCandidatesQuery, enabled = true) {
+  return useQuery({
+    queryKey: ['sync-candidates', q],
+    queryFn: () => api.getSyncCandidates(q),
+    enabled,
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSyncRunPreview() {
+  return useMutation({ mutationFn: (body: SyncRunInput) => api.previewSyncRun(body) });
+}
+
+export function useStartSyncRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (body: SyncRunInput) => api.startSyncRun(body),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sync-runs'] });
+      qc.invalidateQueries({ queryKey: queryKeys.activeSyncRuns });
+    },
+  });
+}
+
+export function useSyncRuns(filters: { profile?: string; status?: string; order?: string; limit?: number; offset?: number } = {}) {
+  return useQuery({
+    queryKey: queryKeys.syncRuns(filters),
+    queryFn: () => api.getSyncRuns(filters),
+    placeholderData: keepPreviousData,
+  });
+}
+
+export function useSyncRun(id: number | null) {
+  return useQuery({
+    queryKey: queryKeys.syncRun(id ?? -1),
+    queryFn: () => api.getSyncRun(id as number),
+    enabled: id != null,
+  });
+}
+
+export function useActiveSyncRuns() {
+  return useQuery({
+    queryKey: queryKeys.activeSyncRuns,
+    queryFn: api.getActiveSyncRuns,
+    refetchInterval: 2500,
+  });
+}
+
+export function useResyncFailed() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: number) => api.resyncFailed(runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['sync-runs'] });
+      qc.invalidateQueries({ queryKey: queryKeys.activeSyncRuns });
+    },
+  });
+}
+
+export function useCancelSyncRun() {
+  const qc = useQueryClient();
+  return useMutation({
+    mutationFn: (runId: number) => api.cancelSyncRun(runId),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: queryKeys.activeSyncRuns });
+      qc.invalidateQueries({ queryKey: ['sync-runs'] });
+    },
+  });
+}
+
+export function useSyncScheduler() {
+  return useQuery({
+    queryKey: queryKeys.syncScheduler,
+    queryFn: api.getSyncScheduler,
+    refetchInterval: (query) => (query.state.data?.busy ? 4_000 : 20_000),
+  });
+}
+
+export function useSyncSchedulerActions() {
+  const qc = useQueryClient();
+  const onSettled = () => {
+    qc.invalidateQueries({ queryKey: queryKeys.syncScheduler });
+    qc.invalidateQueries({ queryKey: ['sync-runs'] });
+  };
+  const runNow = useMutation({ mutationFn: api.runSyncSchedulerNow, onSettled });
+  const pause = useMutation({ mutationFn: api.pauseSyncScheduler, onSettled });
+  const resume = useMutation({ mutationFn: api.resumeSyncScheduler, onSettled });
+  const saveConfig = useMutation({ mutationFn: (c: SyncSchedulerConfig) => api.saveSyncSchedulerConfig(c), onSettled });
+  return { runNow, pause, resume, saveConfig };
 }

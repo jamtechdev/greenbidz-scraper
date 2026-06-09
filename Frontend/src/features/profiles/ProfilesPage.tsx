@@ -7,12 +7,28 @@ import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
 import { ErrorState, TableSkeleton, EmptyState } from '@/components/ui/states';
-import { useProfiles, useRunProfile } from '@/hooks/useApi';
-import { useScrapeLock } from '@/hooks/useScrapeLock';
-import type { ProfileListItem } from '@/types/api';
+import { useProfiles, useRunProfile, useActiveCrawls } from '@/hooks/useApi';
+import type { ProfileListItem, ActiveCrawl } from '@/types/api';
 import { timeAgo, timeUntil } from '@/lib/format';
 import { ProfileSettingsDrawer } from './ProfileSettingsDrawer';
 import { CategoryMappingModal } from '@/features/sync/CategoryMappingModal';
+
+/** Normalize a URL to its bare host (drops protocol, www., trailing slash). */
+function hostOf(url: string): string {
+  try {
+    return new URL(url).host.replace(/^www\./, '').toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** True when a running crawl (from /api/active-crawls) belongs to this profile. */
+function isProfileCrawling(p: ProfileListItem, active: ActiveCrawl[]): boolean {
+  const hosts = new Set(p.listingUrls.map(hostOf).filter(Boolean));
+  if (p.domain) hosts.add(p.domain.replace(/^www\./, '').toLowerCase());
+  if (!hosts.size) return false;
+  return active.some((c) => c.listingUrls.some((u) => hosts.has(hostOf(u))));
+}
 
 export function ProfilesPage() {
   const navigate = useNavigate();
@@ -90,12 +106,16 @@ function ProfileRow({
   onMapCategories: () => void;
 }) {
   const run = useRunProfile();
-  const { locked, lock } = useScrapeLock(p.fileName);
-  const canRun = p.listingUrls.length > 0 && !locked;
+  const { data: activeData } = useActiveCrawls();
+  // Real crawl state from /api/active-crawls — true while a job for this
+  // profile's listing(s) is actually running.
+  const isCrawling = isProfileCrawling(p, activeData?.active ?? []);
+  const busy = isCrawling || run.isPending;
+  const canRun = p.listingUrls.length > 0 && !busy;
 
   const onRun = (e: React.MouseEvent) => {
     e.stopPropagation();
-    run.mutate(p.fileName, { onSuccess: () => lock() });
+    run.mutate(p.fileName);
   };
 
   return (
@@ -146,18 +166,18 @@ function ProfileRow({
             size="sm"
             variant="secondary"
             icon={<Play className="h-3.5 w-3.5" />}
-            loading={run.isPending}
+            loading={busy}
             disabled={!canRun}
             onClick={onRun}
             title={
-              locked
-                ? 'Scraping in progress — try again later'
+              isCrawling
+                ? 'A crawl is currently running for this profile'
                 : p.listingUrls.length
                   ? 'Crawl this profile now'
                   : 'No listing URLs on this profile'
             }
           >
-            {locked ? 'Scraping…' : 'Scrape new'}
+            {busy ? 'Scraping…' : 'Scrape new'}
           </Button>
           <Button
             size="sm"
