@@ -1,5 +1,5 @@
 import { useEffect, useState, type RefObject } from 'react';
-import { RefreshCw, MousePointer2, Globe, AlertTriangle, ArrowRight } from 'lucide-react';
+import { RefreshCw, MousePointer2, Globe, AlertTriangle, ArrowRight, ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/cn';
 
 const ZOOM_OPTIONS = [1, 0.9, 0.8, 0.67, 0.5];
@@ -24,6 +24,10 @@ export function PagePreview({
   onReload,
   onNavigate,
   onRenderError,
+  onBack,
+  onForward,
+  canBack,
+  canForward,
 }: {
   iframeRef: RefObject<HTMLIFrameElement>;
   src: string | null;
@@ -35,6 +39,10 @@ export function PagePreview({
   onReload: () => void;
   onNavigate: (url: string) => void;
   onRenderError?: (message: string) => void;
+  onBack?: () => void;
+  onForward?: () => void;
+  canBack?: boolean;
+  canForward?: boolean;
 }) {
   // Render the (1920-wide) proxied page scaled down so more of the desktop
   // layout is visible at once. Default 80%.
@@ -53,10 +61,24 @@ export function PagePreview({
     <div className="flex h-full flex-col overflow-hidden rounded-xl border border-line bg-panel">
       {/* Browser-chrome toolbar with an editable address bar */}
       <div className="flex items-center gap-2 border-b border-line bg-panel2 px-3 py-2">
-        <div className="flex gap-1.5">
-          <span className="h-3 w-3 rounded-full bg-danger/70" />
-          <span className="h-3 w-3 rounded-full bg-warn/70" />
-          <span className="h-3 w-3 rounded-full bg-accent/70" />
+        {/* Back / Forward (browser-like history) */}
+        <div className="flex gap-0.5">
+          <button
+            onClick={onBack}
+            disabled={!canBack}
+            title="Back"
+            className="rounded-md p-1.5 text-muted transition-colors hover:bg-line/60 hover:text-ink disabled:opacity-30"
+          >
+            <ChevronLeft className="h-4 w-4" />
+          </button>
+          <button
+            onClick={onForward}
+            disabled={!canForward}
+            title="Forward"
+            className="rounded-md p-1.5 text-muted transition-colors hover:bg-line/60 hover:text-ink disabled:opacity-30"
+          >
+            <ChevronRight className="h-4 w-4" />
+          </button>
         </div>
         <div className="flex min-w-0 flex-1 items-center gap-2 rounded-md border border-line bg-bg px-2.5 py-1 focus-within:border-sky2">
           <Globe className="h-3.5 w-3.5 shrink-0 text-muted" />

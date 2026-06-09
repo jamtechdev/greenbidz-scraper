@@ -26,6 +26,34 @@ import { SELECTOR_SCRIPT, SELECTOR_STYLE } from './selector-inject.js';
 // one per request). Recreated lazily if it dies.
 let sharedBrowser = null;
 
+// In-memory snapshot cache so back/forward (or revisiting a URL) is instant and
+// doesn't re-scrape. Keyed by the page URL; small TTL + LRU cap. Explicit Reload
+// bypasses it (force) and refreshes the entry.
+const RENDER_CACHE = new Map(); // url -> { html, finalUrl, title, ts }
+const RENDER_CACHE_TTL_MS = 10 * 60 * 1000; // 10 min
+const RENDER_CACHE_MAX = 40;
+
+function getCachedRender(url) {
+  const e = RENDER_CACHE.get(url);
+  if (!e) return null;
+  if (Date.now() - e.ts > RENDER_CACHE_TTL_MS) {
+    RENDER_CACHE.delete(url);
+    return null;
+  }
+  // Touch for LRU ordering.
+  RENDER_CACHE.delete(url);
+  RENDER_CACHE.set(url, e);
+  return e;
+}
+
+function setCachedRender(url, val) {
+  RENDER_CACHE.set(url, { ...val, ts: Date.now() });
+  while (RENDER_CACHE.size > RENDER_CACHE_MAX) {
+    const oldest = RENDER_CACHE.keys().next().value;
+    RENDER_CACHE.delete(oldest);
+  }
+}
+
 // (B) Third-party hosts that hang or stall headless renders and add nothing to
 // the snapshot — analytics, ads, tag managers, chat widgets. Matched as substrings.
 const BLOCK_HOSTS = [
@@ -54,6 +82,97 @@ async function getBrowser() {
     sharedBrowser = await launchBrowser({ userDataDir: CONSTANTS.PROXY_CACHE_DIR });
   }
   return sharedBrowser;
+}
+
+/**
+ * Dismiss cookie/consent banners and blocking modal overlays, and unlock page
+ * scroll, so the snapshot shows the actual content instead of a popup. Runs in
+ * the live page before we capture HTML (scripts are stripped afterwards, so the
+ * banner can't re-inject into the static snapshot). Best-effort and defensive.
+ * @param {import('puppeteer').Page} page
+ */
+async function dismissOverlays(page) {
+  await page
+    .evaluate(() => {
+      const clickAll = (sel) => {
+        document.querySelectorAll(sel).forEach((el) => {
+          try {
+            el.click();
+          } catch {
+            /* ignore */
+          }
+        });
+      };
+
+      // 1) Known consent/cookie "accept" buttons across common CMPs.
+      [
+        '#onetrust-accept-btn-handler',
+        '#CybotCookiebotDialogBodyLevelButtonLevelOptinAllowAll',
+        '#CybotCookiebotDialogBodyButtonAccept',
+        '#CybotCookiebotDialogBodyButtonAcceptAll',
+        '[data-testid="uc-accept-all-button"]',
+        '[data-testid="cookie-accept"]',
+        '.cc-allow',
+        '.cookie-accept',
+        'button[aria-label*="accept" i]',
+        'button[title*="accept" i]',
+      ].forEach(clickAll);
+
+      // 2) Text-matched accept/close buttons (EN + DE — surplex is German).
+      const wantText =
+        /^(accept all|accept|agree|i agree|allow all|allow|got it|ok|okay|continue|alle akzeptieren|akzeptieren|zustimmen|verstanden|einverstanden)$/i;
+      document.querySelectorAll('button, a[role="button"], [role="button"], input[type="button"], input[type="submit"]').forEach((el) => {
+        const t = (el.textContent || el.value || '').trim();
+        if (t && t.length < 32 && wantText.test(t)) {
+          try {
+            el.click();
+          } catch {
+            /* ignore */
+          }
+        }
+      });
+
+      const vw = window.innerWidth;
+      const vh = window.innerHeight;
+      const isOverlay = (el) => {
+        const cs = getComputedStyle(el);
+        if (cs.position !== 'fixed' && cs.position !== 'sticky') return false;
+        const r = el.getBoundingClientRect();
+        const z = parseInt(cs.zIndex, 10) || 0;
+        const coversMost = r.width >= vw * 0.6 && r.height >= vh * 0.4;
+        const hasBackdrop = cs.backgroundColor && cs.backgroundColor !== 'rgba(0, 0, 0, 0)' && cs.backgroundColor !== 'transparent';
+        return (coversMost && (z >= 100 || hasBackdrop)) || (z >= 1000 && hasBackdrop);
+      };
+
+      // 3) Remove cookie/consent/gdpr/cmp containers (only if they look like overlays).
+      const named = '[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],[id*="gdpr" i],[class*="gdpr" i],[id*="cmp" i],[class*="cmp-" i],[aria-modal="true"],[role="dialog"]';
+      document.querySelectorAll(named).forEach((el) => {
+        try {
+          if (isOverlay(el) || /cookie|consent|gdpr/i.test(el.id + ' ' + el.className)) el.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+
+      // 4) Remove any remaining full-screen fixed backdrop/overlay near the body root.
+      document.querySelectorAll('body > *, body > * > *').forEach((el) => {
+        try {
+          if (isOverlay(el)) el.remove();
+        } catch {
+          /* ignore */
+        }
+      });
+
+      // 5) Undo scroll locks the banner may have set on <html>/<body>.
+      for (const node of [document.documentElement, document.body]) {
+        if (!node) continue;
+        node.style.overflow = '';
+        node.style.position = '';
+        node.style.height = '';
+        node.style.paddingRight = '';
+      }
+    })
+    .catch(() => {});
 }
 
 /** Best-effort close of the shared browser (e.g. on shutdown). */
@@ -109,9 +228,18 @@ function injectStudio(html, pageUrl) {
  * Render + sanitise a page for the Mapping Studio iframe.
  *
  * @param {string} pageUrl
+ * @param {object} [opts]
+ * @param {boolean} [opts.force] - Bypass + refresh the snapshot cache (Reload).
  * @returns {Promise<{ html: string, finalUrl: string, title: string }>}
  */
-export async function renderProxyPage(pageUrl) {
+export async function renderProxyPage(pageUrl, { force = false } = {}) {
+  if (!force) {
+    const cached = getCachedRender(pageUrl);
+    if (cached) {
+      logger.info(`🪞 Proxy cache hit ${pageUrl}`);
+      return { html: cached.html, finalUrl: cached.finalUrl, title: cached.title };
+    }
+  }
   const browser = await getBrowser();
   const page = await newPage(browser);
   try {
@@ -166,6 +294,10 @@ export async function renderProxyPage(pageUrl) {
       .then(() => true)
       .catch(() => false);
 
+    // Dismiss cookie/consent banners + modal overlays and unlock scroll BEFORE
+    // scrolling, so the lazy-load scroll works and the snapshot isn't covered.
+    await dismissOverlays(page);
+
     // Gently scroll through the page to trigger lazy-loaded cards/images (this
     // sets <img src>/data-src so the user's browser loads them later via
     // <base href>), then return to the top so the snapshot looks initial.
@@ -184,6 +316,10 @@ export async function renderProxyPage(pageUrl) {
       })
       .catch(() => {});
     await new Promise((r) => setTimeout(r, CONSTANTS.PROXY_SETTLE_MS));
+
+    // Re-run after the settle delay to catch delayed pop-ups (newsletter modals,
+    // late-loading consent banners) that appear a beat after first paint.
+    await dismissOverlays(page);
 
     const raw = await page.evaluate(() => document.documentElement.outerHTML);
     const finalUrl = page.url();
@@ -207,6 +343,7 @@ export async function renderProxyPage(pageUrl) {
     }
 
     const html = injectStudio(stripUnsafe(raw), finalUrl);
+    setCachedRender(pageUrl, { html, finalUrl, title });
     return { html, finalUrl, title };
   } finally {
     await page.close().catch(() => {});

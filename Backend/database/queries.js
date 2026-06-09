@@ -663,13 +663,33 @@ export async function selectProductsForSync({
   return { ids: rows.map((r) => r.id), total };
 }
 
-/** Distinct main-site categories that have at least one saved source mapping. */
-export async function listMappedMainCategories() {
+/**
+ * Distinct main-site categories that have at least one saved source mapping.
+ * When `profile` is given, only the main categories reachable from THAT
+ * profile's scraped product categories (raw_data.category) are returned.
+ * @param {string} [profile] - profile_file_name to scope to.
+ */
+export async function listMappedMainCategories(profile) {
+  if (!profile) {
+    return selectSql(
+      `SELECT main_term_id, MAX(main_term_name) AS main_term_name
+       FROM category_mappings
+       GROUP BY main_term_id
+       ORDER BY main_term_name`,
+    );
+  }
   return selectSql(
-    `SELECT main_term_id, MAX(main_term_name) AS main_term_name
-     FROM category_mappings
-     GROUP BY main_term_id
+    `SELECT cm.main_term_id, MAX(cm.main_term_name) AS main_term_name
+     FROM category_mappings cm
+     WHERE cm.source_category IN (
+       SELECT DISTINCT JSON_UNQUOTE(JSON_EXTRACT(p.raw_data, '$.category'))
+       FROM products p
+       WHERE p.profile_file_name = ?
+         AND JSON_EXTRACT(p.raw_data, '$.category') IS NOT NULL
+     )
+     GROUP BY cm.main_term_id
      ORDER BY main_term_name`,
+    [profile],
   );
 }
 

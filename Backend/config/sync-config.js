@@ -57,7 +57,7 @@ export const SYNC_DEFAULTS = {
 export const ENUMS = {
   product_type: ['simple', 'auction'],
   price_format: ['buyNow', 'auction'],
-  price_currency: ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY'],
+  price_currency: ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY', 'INR'],
   // Only two selectable conditions on the sync UI. Values are the main API's
   // codes; the UI shows friendly labels (new → "New", usedFunctional → "Used").
   item_condition: ['new', 'usedFunctional'],

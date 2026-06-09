@@ -18,10 +18,11 @@ type LimitChoice = '10' | '20' | '50' | '100' | 'all' | 'custom';
 export function NewSyncTab() {
   const navigate = useNavigate();
   const profilesQ = useProfiles();
-  const mappedQ = useMappedCategories();
-
   const [profile, setProfile] = useState('');
   const [mainCategory, setMainCategory] = useState<number | ''>('');
+  // Mapped categories are scoped to the selected profile (only the ones that
+  // profile's scraped products map to); all mapped categories when "All".
+  const mappedQ = useMappedCategories(profile || undefined);
   const [priceMin, setPriceMin] = useState<number | ''>('');
   const [priceMax, setPriceMax] = useState<number | ''>('');
   const [titleInput, setTitleInput] = useState('');
@@ -118,7 +119,14 @@ export function NewSyncTab() {
       <Card>
         <CardBody className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
           <Labeled label="Profile">
-            <select className="input" value={profile} onChange={(e) => setProfile(e.target.value)}>
+            <select
+              className="input"
+              value={profile}
+              onChange={(e) => {
+                setProfile(e.target.value);
+                setMainCategory(''); // category list is profile-scoped; reset the pick
+              }}
+            >
               <option value="">All profiles</option>
               {profiles.map((p) => (
                 <option key={p.fileName} value={p.fileName}>

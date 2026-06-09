@@ -193,7 +193,10 @@ export async function proxyPage(req, res) {
     return sendHtml(res, 400, '<h1>Invalid or missing ?url=</h1>');
   }
   try {
-    const { html } = await renderProxyPage(target);
+    // `fresh` (set by the Reload button) bypasses + refreshes the snapshot cache;
+    // normal navigation / back-forward uses the cache for instant revisits.
+    const force = req.query.fresh !== undefined;
+    const { html } = await renderProxyPage(target, { force });
     return sendHtml(res, 200, html);
   } catch (err) {
     logger.error(`Proxy-page failed for ${target}: ${err.message}`);

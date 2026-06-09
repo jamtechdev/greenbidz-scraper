@@ -35,7 +35,13 @@ export interface HoverMessage {
   tag: string;
 }
 
-export type IframeMessage = PickedMessage | ReadyMessage | HoverMessage;
+export interface NavigateMessage {
+  source: 'scraper-iframe';
+  type: 'navigate';
+  url: string;
+}
+
+export type IframeMessage = PickedMessage | ReadyMessage | HoverMessage | NavigateMessage;
 
 export type FieldType = 'text' | 'html' | 'attr' | 'number';
 
@@ -97,7 +103,7 @@ export const BUILTIN_FIELDS: FieldDraft[] = [
 ];
 
 /** Currency options for the profile-level price currency dropdown. */
-export const CURRENCY_OPTIONS = ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY'];
+export const CURRENCY_OPTIONS = ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY', 'INR'];
 
 export function emptyDraft(): MappingDraft {
   return {

@@ -202,10 +202,10 @@ export function useSubmitSync() {
 
 // ── Sync Management (background runs + history + scheduler) ──────────────────
 
-export function useMappedCategories() {
+export function useMappedCategories(profile?: string) {
   return useQuery({
-    queryKey: ['mapped-categories'],
-    queryFn: api.getMappedCategories,
+    queryKey: ['mapped-categories', profile ?? ''],
+    queryFn: () => api.getMappedCategories(profile),
     staleTime: 60 * 1000,
   });
 }

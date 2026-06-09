@@ -34,9 +34,10 @@ async function profileCurrencyMap() {
   return map;
 }
 
-/** GET /api/sync/mapped-categories — distinct main categories that have a mapping. */
+/** GET /api/sync/mapped-categories?profile= — distinct mapped main categories,
+ *  scoped to a profile's scraped categories when `profile` is provided. */
 export async function getMappedCategories(req, res) {
-  const categories = await listMappedMainCategories();
+  const categories = await listMappedMainCategories(req.query.profile || undefined);
   res.json({ categories });
 }
 

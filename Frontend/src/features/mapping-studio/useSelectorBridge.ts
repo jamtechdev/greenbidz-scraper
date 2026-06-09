@@ -1,10 +1,11 @@
 import { useCallback, useEffect, useRef } from 'react';
-import type { HoverMessage, PickedMessage, ReadyMessage } from './types';
+import type { HoverMessage, NavigateMessage, PickedMessage, ReadyMessage } from './types';
 
 interface BridgeHandlers {
   onPicked?: (m: PickedMessage) => void;
   onReady?: (m: ReadyMessage) => void;
   onHover?: (m: HoverMessage) => void;
+  onNavigate?: (m: NavigateMessage) => void;
 }
 
 /**
@@ -26,6 +27,7 @@ export function useSelectorBridge(handlers: BridgeHandlers) {
       if (d.type === 'picked') handlersRef.current.onPicked?.(d as PickedMessage);
       else if (d.type === 'ready') handlersRef.current.onReady?.(d as ReadyMessage);
       else if (d.type === 'hover') handlersRef.current.onHover?.(d as HoverMessage);
+      else if (d.type === 'navigate') handlersRef.current.onNavigate?.(d as NavigateMessage);
     }
     window.addEventListener('message', onMessage);
     return () => window.removeEventListener('message', onMessage);

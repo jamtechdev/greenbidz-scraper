@@ -223,7 +223,8 @@ export const api = {
     }),
 
   // ── Sync Management (background runs + history + scheduler) ────────────────
-  getMappedCategories: () => request<MappedCategoriesResponse>('/sync/mapped-categories'),
+  getMappedCategories: (profile?: string) =>
+    request<MappedCategoriesResponse>(`/sync/mapped-categories${profile ? `?profile=${encodeURIComponent(profile)}` : ''}`),
 
   getSyncCandidates: (q: SyncCandidatesQuery = {}) => {
     const params = new URLSearchParams();

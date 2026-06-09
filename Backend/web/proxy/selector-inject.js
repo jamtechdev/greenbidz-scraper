@@ -10,6 +10,7 @@
  *   iframe → parent : { source:'scraper-iframe', type:'ready' }
  *                     { source:'scraper-iframe', type:'picked', field, multi, payload }
  *                     { source:'scraper-iframe', type:'hover', text }
+ *                     { source:'scraper-iframe', type:'navigate', url }   // link click
  *   parent → iframe : { source:'scraper-parent', type:'arm', field, color, multi }
  *                     { source:'scraper-parent', type:'disarm' }
  *                     { source:'scraper-parent', type:'clear', field }
@@ -206,11 +207,19 @@ export const SELECTOR_SCRIPT = `
     if (e.target && e.target.classList) e.target.classList.remove('__sx-hover');
   }, true);
 
-  // Capture-phase click: always block navigation; map element when armed.
+  // Capture-phase click: block the page's own navigation. When NOT mapping,
+  // act like a browser — follow an <a href> through the proxy (parent reloads
+  // the preview at that URL). When mapping (armed), pick the element instead.
   document.addEventListener('click', function (e) {
     e.preventDefault();
     e.stopPropagation();
-    if (!armed) return;
+    if (!armed) {
+      var a = e.target && e.target.closest ? e.target.closest('a[href]') : null;
+      if (a && a.href && /^https?:/i.test(a.href)) {
+        send({ type: 'navigate', url: a.href });
+      }
+      return;
+    }
     var el = e.target;
     if (!el || el.nodeType !== 1) return;
     el.classList.remove('__sx-hover');

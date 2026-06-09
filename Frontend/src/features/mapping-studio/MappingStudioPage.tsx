@@ -68,6 +68,8 @@ export function MappingStudioPage() {
   const [loadingPage, setLoadingPage] = useState(false);
   const [hoverText, setHoverText] = useState<string | null>(null);
   const [reloadNonce, setReloadNonce] = useState(0);
+  const [forceReload, setForceReload] = useState(false); // true → bypass backend cache
+  const [nav, setNav] = useState<{ stack: string[]; index: number }>({ stack: [], index: -1 });
   const [overrideAck, setOverrideAck] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -130,6 +132,50 @@ export function MappingStudioPage() {
     [update],
   );
 
+  // Point the preview at a URL (updates the current step's target). Not a
+  // history push — used by both push-navigation and back/forward.
+  const applyTarget = useCallback(
+    (u: string) => {
+      setForceReload(false); // navigating/back-forward may use the cache
+      if (step === 1) update({ listingUrl: u });
+      else if (step === 2) update({ sampleProductUrl: u });
+    },
+    [step, update],
+  );
+
+  // Navigate the preview to a new URL + push onto history (address bar + link
+  // clicks). Truncates any forward entries, browser-style.
+  const onNavigate = useCallback(
+    (u: string) => {
+      applyTarget(u);
+      setNav((prev) => {
+        const base = prev.stack.slice(0, prev.index + 1);
+        if (base[base.length - 1] === u) return { stack: base, index: base.length - 1 };
+        const stack = [...base, u];
+        return { stack, index: stack.length - 1 };
+      });
+    },
+    [applyTarget],
+  );
+
+  const goPreviewBack = useCallback(() => {
+    setNav((prev) => {
+      if (prev.index <= 0) return prev;
+      const i = prev.index - 1;
+      applyTarget(prev.stack[i]);
+      return { ...prev, index: i };
+    });
+  }, [applyTarget]);
+
+  const goPreviewForward = useCallback(() => {
+    setNav((prev) => {
+      if (prev.index >= prev.stack.length - 1) return prev;
+      const i = prev.index + 1;
+      applyTarget(prev.stack[i]);
+      return { ...prev, index: i };
+    });
+  }, [applyTarget]);
+
   const bridge = useSelectorBridge({
     onPicked,
     onReady: () => {
@@ -138,6 +184,8 @@ export function MappingStudioPage() {
       setLoadError(null);
     },
     onHover: (m) => setHoverText(m.text),
+    // Browser-like: clicking a link in the preview (when not mapping) follows it.
+    onNavigate: (m) => onNavigate(m.url),
   });
 
   const { arm: armBridge, disarm, clear: clearBridge, countMatches } = bridge;
@@ -199,9 +247,21 @@ export function MappingStudioPage() {
   // ── current page src ───────────────────────────────────────────────────────────
   const targetUrl = step === 1 ? draft.listingUrl : step === 2 ? draft.sampleProductUrl : '';
   const src = useMemo(
-    () => (targetUrl ? `${api.proxyPageSrc(targetUrl)}&_n=${reloadNonce}` : null),
-    [targetUrl, reloadNonce],
+    () =>
+      targetUrl
+        ? `${api.proxyPageSrc(targetUrl)}&_n=${reloadNonce}${forceReload ? `&fresh=${reloadNonce}` : ''}`
+        : null,
+    [targetUrl, reloadNonce, forceReload],
   );
+
+  // Seed browsing history when entering a render step (Listing / Fields).
+  useEffect(() => {
+    if (step === 1 || step === 2) {
+      setNav(targetUrl ? { stack: [targetUrl], index: 0 } : { stack: [], index: -1 });
+    }
+    // Only on step change — navigation within a step manages history itself.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step]);
 
   // Reset interaction state whenever the loaded page changes, and arm a timeout
   // so a page that never finishes rendering surfaces an error (not an endless spinner).
@@ -222,15 +282,6 @@ export function MappingStudioPage() {
       if (loadTimer.current) clearTimeout(loadTimer.current);
     };
   }, [src]);
-
-  // Navigate the preview's address bar to a new URL (updates the step's target).
-  const onNavigate = useCallback(
-    (u: string) => {
-      if (step === 1) update({ listingUrl: u });
-      else if (step === 2) update({ sampleProductUrl: u });
-    },
-    [step, update],
-  );
 
   // Fail fast when the backend returns its "could not render" HTML page.
   const onRenderError = useCallback((msg: string) => {
@@ -328,9 +379,16 @@ export function MappingStudioPage() {
               armedLabel={armedLabel}
               hoverText={hoverText}
               url={targetUrl}
-              onReload={() => setReloadNonce((n) => n + 1)}
+              onReload={() => {
+                setForceReload(true); // Reload bypasses the backend snapshot cache
+                setReloadNonce((n) => n + 1);
+              }}
               onNavigate={onNavigate}
               onRenderError={onRenderError}
+              onBack={goPreviewBack}
+              onForward={goPreviewForward}
+              canBack={nav.index > 0}
+              canForward={nav.index < nav.stack.length - 1}
             />
           </div>
         )}
