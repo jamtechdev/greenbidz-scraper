@@ -9,9 +9,11 @@ import profilesRoutes from './profiles.routes.js';
 import scrapeRoutes from './scrape.routes.js';
 import syncRoutes from './sync.routes.js';
 import schedulerRoutes from './scheduler.routes.js';
+import authRoutes from './auth.routes.js';
 
 export const apiRouter = Router();
 
+apiRouter.use(authRoutes);
 apiRouter.use(stateRoutes);
 apiRouter.use(productsRoutes);
 apiRouter.use(crawlsRoutes);
