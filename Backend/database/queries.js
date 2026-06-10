@@ -556,6 +556,34 @@ export async function countProducts() {
 }
 
 /**
+ * Per-profile product health: totals, scraped, synced and errored counts keyed
+ * by `profile_file_name`. Used to show inline stats on the Profiles page.
+ * @returns {Promise<Record<string, {total:number, scraped:number, synced:number, errored:number}>>}
+ */
+export async function countProductsPerProfile() {
+  const rows = await selectSql(
+    `SELECT profile_file_name,
+            COUNT(*) AS total,
+            SUM(scraped = TRUE) AS scraped,
+            SUM(synced_at IS NOT NULL) AS synced,
+            SUM(last_error IS NOT NULL AND last_error <> '') AS errored
+     FROM products
+     WHERE profile_file_name IS NOT NULL AND profile_file_name <> ''
+     GROUP BY profile_file_name`,
+  );
+  const map = {};
+  for (const r of rows) {
+    map[r.profile_file_name] = {
+      total: Number(r.total) || 0,
+      scraped: Number(r.scraped) || 0,
+      synced: Number(r.synced) || 0,
+      errored: Number(r.errored) || 0,
+    };
+  }
+  return map;
+}
+
+/**
  * Count products belonging to a site/domain (matched on the product URL host).
  * @param {string} domain
  * @returns {Promise<number>}

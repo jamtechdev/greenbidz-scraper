@@ -33,6 +33,22 @@ export function formatDate(iso: string | null | undefined): string {
   });
 }
 
+/** Full, unambiguous timestamp (with year + seconds + zone) — for hover titles. */
+export function formatDateAbsolute(iso: string | null | undefined): string {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return String(iso);
+  return d.toLocaleString('en-US', {
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    timeZoneName: 'short',
+  });
+}
+
 /** Relative "time ago" string for recent timestamps. */
 export function timeAgo(iso: string | null | undefined): string {
   if (!iso) return '—';

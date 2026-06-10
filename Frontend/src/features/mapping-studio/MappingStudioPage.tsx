@@ -14,6 +14,7 @@ import {
   ClipboardCheck,
   type LucideIcon,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { api } from '@/lib/api';
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
@@ -74,7 +75,9 @@ export function MappingStudioPage() {
   const [reloadNonce, setReloadNonce] = useState(0);
   const [forceReload, setForceReload] = useState(false); // true → bypass backend cache
   const [nav, setNav] = useState<{ stack: string[]; index: number }>({ stack: [], index: -1 });
-  const [overrideAck, setOverrideAck] = useState(false);
+  // null = undecided; 'override' = overwrite the matched profile; 'new' = build
+  // a separate new profile for the same domain.
+  const [profileMode, setProfileMode] = useState<'override' | 'new' | null>(null);
   const [loadError, setLoadError] = useState<string | null>(null);
   const loadTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -87,7 +90,7 @@ export function MappingStudioPage() {
   }, [profiles, draft.listingUrl]);
 
   // Re-require the choice if the URL changes.
-  useEffect(() => setOverrideAck(false), [draft.listingUrl]);
+  useEffect(() => setProfileMode(null), [draft.listingUrl]);
 
   const update = useCallback((patch: Partial<MappingDraft>) => {
     setDraft((d) => ({ ...d, ...patch }));
@@ -335,7 +338,7 @@ export function MappingStudioPage() {
 
   const canNext =
     step === 0
-      ? isHttpUrl(draft.listingUrl) && (!matchedProfile || overrideAck)
+      ? isHttpUrl(draft.listingUrl) && (!matchedProfile || profileMode !== null)
       : step === 1
         ? isHttpUrl(draft.sampleProductUrl)
         : true;
@@ -370,8 +373,9 @@ export function MappingStudioPage() {
             draft={draft}
             update={update}
             matchedProfile={matchedProfile}
-            overrideAck={overrideAck}
-            onOverride={() => setOverrideAck(true)}
+            profileMode={profileMode}
+            onOverride={() => setProfileMode('override')}
+            onCreateNew={() => setProfileMode('new')}
             onSubmit={goNext}
             canSubmit={canNext}
           />
@@ -417,7 +421,17 @@ export function MappingStudioPage() {
           </div>
         )}
 
-        {step === 3 && <ReviewStep draft={draft} onChange={update} editFileName={editFileName} />}
+        {step === 3 && (
+          <ReviewStep
+            draft={draft}
+            onChange={update}
+            // Where to save: edit → that file; matched + override → overwrite it;
+            // matched + new (or no match) → create a fresh (possibly suffixed) profile.
+            saveFileName={editFileName ?? (profileMode === 'override' ? matchedProfile?.fileName ?? null : null)}
+            createNew={!editFileName && profileMode === 'new'}
+            isEdit={!!editFileName}
+          />
+        )}
       </div>
 
       {/* Footer nav */}
@@ -509,16 +523,18 @@ function UrlStep({
   draft,
   update,
   matchedProfile,
-  overrideAck,
+  profileMode,
   onOverride,
+  onCreateNew,
   onSubmit,
   canSubmit,
 }: {
   draft: MappingDraft;
   update: (p: Partial<MappingDraft>) => void;
   matchedProfile: ProfileListItem | null;
-  overrideAck: boolean;
+  profileMode: 'override' | 'new' | null;
   onOverride: () => void;
+  onCreateNew: () => void;
   onSubmit: () => void;
   canSubmit: boolean;
 }) {
@@ -531,8 +547,10 @@ function UrlStep({
     run.mutate(matchedProfile.fileName, {
       onSuccess: () => {
         lock.lock();
+        toast.success(`Crawl started for “${matchedProfile.profileName || matchedProfile.fileName}”.`);
         navigate('/products');
       },
+      onError: (e) => toast.error((e as Error).message),
     });
   };
 
@@ -575,15 +593,15 @@ function UrlStep({
             Use the page where products are listed and paginated — not a single product page.
           </p>
 
-        {matchedProfile && !overrideAck && (
+        {matchedProfile && !profileMode && (
           <div className="mt-4 rounded-lg border border-warn/40 bg-amber-900/20 p-3">
             <div className="flex items-start gap-2 text-xs text-amber-200">
               <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
               <div>
-                A profile already matches this URL:{' '}
+                A profile already matches this domain:{' '}
                 <code className="font-mono">{matchedProfile.fileName}</code>
-                {matchedProfile.profileName ? ` (${matchedProfile.profileName})` : ''}. Rebuilding
-                and saving with the same domain will <b>overwrite</b> it.
+                {matchedProfile.profileName ? ` (${matchedProfile.profileName})` : ''}. Choose what
+                to do — you can keep it and build a <b>separate</b> profile (e.g. per category).
               </div>
             </div>
             <div className="mt-3 flex flex-wrap gap-2">
@@ -596,19 +614,28 @@ function UrlStep({
               >
                 {lock.locked ? 'Scraping…' : 'Scrape new products'}
               </Button>
-              <Button size="sm" variant="secondary" onClick={onOverride}>
-                Override (rebuild profile)
+              <Button size="sm" variant="secondary" onClick={onCreateNew}>
+                Create new profile
+              </Button>
+              <Button size="sm" variant="ghost" onClick={onOverride}>
+                Override existing
               </Button>
             </div>
             <p className="mt-2 text-[11px] text-amber-200/70">
-              “Scrape new products” runs the existing profile now. “Override” lets you re-map and
-              overwrite it.
+              <b>Scrape new products</b> runs the existing profile now. <b>Create new</b> builds a
+              separate profile for this domain (existing one untouched). <b>Override</b> re-maps and
+              overwrites the existing profile.
             </p>
           </div>
         )}
-        {matchedProfile && overrideAck && (
+        {matchedProfile && profileMode === 'override' && (
           <p className="mt-3 text-[11px] text-warn">
             Overwriting <code className="font-mono">{matchedProfile.fileName}</code> on save.
+          </p>
+        )}
+        {matchedProfile && profileMode === 'new' && (
+          <p className="mt-3 text-[11px] text-accent">
+            Creating a <b>new</b> profile for this domain — the existing one stays as-is.
           </p>
         )}
         </div>

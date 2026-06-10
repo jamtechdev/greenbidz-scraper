@@ -1,7 +1,8 @@
-import { Menu, RefreshCw, Circle, PanelLeftClose, PanelLeftOpen } from 'lucide-react';
+import { Menu, RefreshCw, Circle, PanelLeftClose, PanelLeftOpen, Loader2 } from 'lucide-react';
+import { Link } from 'react-router-dom';
 import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
-import { useDashboardState } from '@/hooks/useApi';
+import { useDashboardState, useActiveCrawls, useActiveSyncRuns } from '@/hooks/useApi';
 import { useLayout } from './layout-context';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
@@ -9,6 +10,21 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
   const qc = useQueryClient();
   const { isError } = useDashboardState();
   const { collapsed, setCollapsed } = useLayout();
+
+  // Global "work in progress" awareness — visible from any page.
+  const crawls = useActiveCrawls().data?.active ?? [];
+  const syncs = useActiveSyncRuns().data?.active ?? [];
+  const crawlCount = crawls.length;
+  const syncCount = syncs.length;
+  const activeTotal = crawlCount + syncCount;
+  // Prefer the page that actually has activity.
+  const activityTarget = crawlCount > 0 ? '/crawls' : '/sync-manager?tab=history&status=processing';
+  const activityLabel = [
+    crawlCount > 0 ? `${crawlCount} crawl${crawlCount === 1 ? '' : 's'}` : null,
+    syncCount > 0 ? `${syncCount} sync${syncCount === 1 ? '' : 's'}` : null,
+  ]
+    .filter(Boolean)
+    .join(' · ');
 
   return (
     <header className="sticky top-0 z-30 flex h-16 items-center gap-3 border-b border-line bg-bg/80 px-4 backdrop-blur lg:px-6">
@@ -30,6 +46,18 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
       </button>
 
       <div className="flex-1" />
+
+      {/* Global activity indicator — live count of running crawls + syncs, visible from any page. */}
+      {activeTotal > 0 && (
+        <Link
+          to={activityTarget}
+          className="flex items-center gap-1.5 rounded-full border border-accent/40 bg-accent/10 px-3 py-1.5 text-xs font-semibold text-accent transition-colors hover:bg-accent/20"
+          title={`Running now: ${activityLabel}`}
+        >
+          <Loader2 className="h-3.5 w-3.5 animate-spin" />
+          {activeTotal} running
+        </Link>
+      )}
 
       {/* Backend status light (red = offline, green = connected) */}
       <span

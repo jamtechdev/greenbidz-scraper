@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import { UploadCloud, ArrowLeft, CheckCircle2, AlertTriangle, ImageIcon, Loader2 } from 'lucide-react';
+import { UploadCloud, ArrowLeft, CheckCircle2, AlertTriangle, ImageIcon, Loader2, Clock } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { LoadingState, ErrorState, EmptyState } from '@/components/ui/states';
 import { Modal } from '@/components/ui/Modal';
-import { useSyncMeta, useSyncSellers, useSyncCategories, usePreviewSync, useSubmitSync } from '@/hooks/useApi';
+import toast from 'react-hot-toast';
+import { useSyncMeta, useSyncSellers, useSyncCategories, usePreviewSync, useSubmitSync, useStartSyncRun } from '@/hooks/useApi';
 import { htmlToText } from '@/lib/html';
 import type { SyncCategory } from '@/types/api';
 import { CategoryMappingModal } from './CategoryMappingModal';
@@ -69,6 +70,7 @@ export function SyncPage() {
   const meta = useSyncMeta();
   const preview = usePreviewSync();
   const submit = useSubmitSync();
+  const startRun = useStartSyncRun();
 
   const [marketplace, setMarketplace] = useState('');
   const [sellerId, setSellerId] = useState<number | null>(null);
@@ -173,7 +175,7 @@ export function SyncPage() {
 
   const readyIds = productIds.filter((id) => isReady(forms[id]));
 
-  const onSubmit = () => {
+  const buildOverrides = () => {
     const overrides: Record<string, Record<string, unknown>> = {};
     for (const id of readyIds) {
       const f = forms[id];
@@ -193,7 +195,33 @@ export function SyncPage() {
         price_currency: f.price_currency,
       };
     }
-    submit.mutate({ productIds: readyIds, marketplace, sellerId: sellerId as number, sellerName, country, overrides });
+    return overrides;
+  };
+
+  const onSubmit = () => {
+    submit.mutate({ productIds: readyIds, marketplace, sellerId: sellerId as number, sellerName, country, overrides: buildOverrides() });
+  };
+
+  // Same payload, but as a tracked background run → land on the History tab.
+  const onSubmitBackground = () => {
+    startRun.mutate(
+      {
+        filters: {},
+        productIds: readyIds,
+        marketplace,
+        sellerId: sellerId as number,
+        sellerName,
+        country,
+        overrides: buildOverrides(),
+      },
+      {
+        onSuccess: (res) => {
+          toast.success(`Background sync started — run #${res.runId} (${res.total} product(s)).`);
+          navigate('/sync-manager?tab=history&status=processing');
+        },
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
   };
 
   if (!productIds.length) {
@@ -463,13 +491,24 @@ export function SyncPage() {
           {submitted ? (
             <Button onClick={() => navigate('/products')}>Done</Button>
           ) : (
-            <Button
-              icon={submit.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
-              disabled={readyIds.length === 0 || submit.isPending}
-              onClick={onSubmit}
-            >
-              {submit.isPending ? 'Syncing…' : `Sync ${readyIds.length} product(s)`}
-            </Button>
+            <>
+              <Button
+                variant="secondary"
+                icon={startRun.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
+                disabled={readyIds.length === 0 || startRun.isPending || submit.isPending}
+                onClick={onSubmitBackground}
+                title="Run as a tracked background job and go to History"
+              >
+                {startRun.isPending ? 'Starting…' : 'Sync in background'}
+              </Button>
+              <Button
+                icon={submit.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
+                disabled={readyIds.length === 0 || submit.isPending || startRun.isPending}
+                onClick={onSubmit}
+              >
+                {submit.isPending ? 'Syncing…' : `Sync ${readyIds.length} product(s)`}
+              </Button>
+            </>
           )}
         </div>
       </div>

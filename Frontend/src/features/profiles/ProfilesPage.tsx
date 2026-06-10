@@ -1,15 +1,17 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { FileCode2, Play, Plus, Settings2, AlertCircle, PauseCircle, Tags } from 'lucide-react';
+import { FileCode2, Play, Plus, Settings2, AlertCircle, PauseCircle, Tags, Package, CheckCircle2, UploadCloud } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
 import { ErrorState, TableSkeleton, EmptyState } from '@/components/ui/states';
+import { RelTime } from '@/components/ui/RelTime';
 import { useProfiles, useRunProfile, useActiveCrawls } from '@/hooks/useApi';
 import type { ProfileListItem, ActiveCrawl } from '@/types/api';
-import { timeAgo, timeUntil } from '@/lib/format';
+import { formatNumber } from '@/lib/format';
 import { ProfileSettingsDrawer } from './ProfileSettingsDrawer';
 import { CategoryMappingModal } from '@/features/sync/CategoryMappingModal';
 
@@ -52,7 +54,7 @@ export function ProfilesPage() {
       <Card>
         <CardBody className="p-0">
           {isLoading ? (
-            <TableSkeleton rows={5} cols={5} />
+            <TableSkeleton rows={5} cols={6} />
           ) : isError ? (
             <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
           ) : !profiles.length ? (
@@ -60,12 +62,18 @@ export function ProfilesPage() {
               title="No profiles yet"
               hint="Build one in the visual Mapping Studio."
               icon={<FileCode2 className="h-5 w-5" />}
+              action={
+                <Button icon={<Plus className="h-4 w-4" />} onClick={() => navigate('/scraper/new')}>
+                  Create your first scraper
+                </Button>
+              }
             />
           ) : (
             <Table>
               <THead>
                 <TH>Profile</TH>
                 <TH>Mode</TH>
+                <TH>Products</TH>
                 <TH>Last scraped</TH>
                 <TH>Next scrape</TH>
                 <TH className="text-right">Actions</TH>
@@ -115,12 +123,17 @@ function ProfileRow({
 
   const onRun = (e: React.MouseEvent) => {
     e.stopPropagation();
-    run.mutate(p.fileName);
+    run.mutate(p.fileName, {
+      onSuccess: () => toast.success(`Crawl started for “${p.profileName || p.fileName}”.`),
+      onError: (err) => toast.error((err as Error).message),
+    });
   };
+
+  const productCount = p.productCount ?? 0;
 
   return (
     <TR className="cursor-pointer" onClick={onOpen}>
-      <TD className="max-w-[300px]">
+      <TD className="max-w-[400px]">
         <div className="flex items-center gap-2">
           <span className="font-medium text-ink">{p.profileName || p.fileName}</span>
           <Badge tone={p.source === 'api' ? 'api' : 'dom'}>{p.source}</Badge>
@@ -146,17 +159,45 @@ function ProfileRow({
           <Badge tone="info">{p.scrapeLimit ? `≤${p.scrapeLimit}/run` : 'all/run'}</Badge>
         </div>
       </TD>
-      <TD className="whitespace-nowrap text-xs text-muted">
-        {p.lastScrapedAt ? timeAgo(p.lastScrapedAt) : 'never'}
+      <TD className="whitespace-nowrap text-xs">
+        {productCount === 0 ? (
+          <span className="text-muted">no products</span>
+        ) : (
+          <div className="flex items-center gap-2.5 text-muted">
+            <span className="inline-flex items-center gap-1" title={`${productCount} products discovered`}>
+              <Package className="h-3 w-3" /> {formatNumber(productCount)}
+            </span>
+            <span className="inline-flex items-center gap-1 text-sky2" title={`${p.syncedCount ?? 0} synced to main site`}>
+              <UploadCloud className="h-3 w-3" /> {formatNumber(p.syncedCount ?? 0)}
+            </span>
+            {(p.scrapedCount ?? 0) > 0 && (
+              <span className="inline-flex items-center gap-1 text-emerald-300" title={`${p.scrapedCount} scraped`}>
+                <CheckCircle2 className="h-3 w-3" /> {formatNumber(p.scrapedCount ?? 0)}
+              </span>
+            )}
+            {(p.erroredCount ?? 0) > 0 && (
+              <span title={`${p.erroredCount} with errors`}>
+                <Badge tone="no">{formatNumber(p.erroredCount ?? 0)} err</Badge>
+              </span>
+            )}
+          </div>
+        )}
       </TD>
       <TD className="whitespace-nowrap text-xs text-muted">
-        {p.scrapeMode === 'auto' && !p.paused && p.nextScrapeAt ? timeUntil(p.nextScrapeAt) : '—'}
+        <RelTime iso={p.lastScrapedAt} fallback="never" />
+      </TD>
+      <TD className="whitespace-nowrap text-xs text-muted">
+        {p.scrapeMode === 'auto' && !p.paused && p.nextScrapeAt ? (
+          <RelTime iso={p.nextScrapeAt} mode="until" />
+        ) : (
+          '—'
+        )}
       </TD>
       <TD>
-        <div className="flex items-center justify-end gap-2">
+        <div className="flex items-center justify-end gap-1.5">
           {run.isError && (
             <span
-              className="flex items-center gap-1 text-xs text-danger"
+              className="flex items-center gap-1 whitespace-nowrap text-xs text-danger"
               title={(run.error as Error).message}
             >
               <AlertCircle className="h-3.5 w-3.5" /> failed
@@ -179,44 +220,31 @@ function ProfileRow({
           >
             {busy ? 'Scraping…' : 'Scrape new'}
           </Button>
-          {/* {p.source !== 'api' && (
-            <Button
-              size="sm"
-              variant="ghost"
-              icon={<Pencil className="h-3.5 w-3.5" />}
-              onClick={(e) => {
-                e.stopPropagation();
-                navigate(`/scraper/new?edit=${encodeURIComponent(p.fileName)}`);
-              }}
-              title="Edit field mapping (overwrites this profile on save)"
-            >
-              Edit fields
-            </Button>
-          )} */}
+          {/* Secondary actions are icon-only (label in tooltip) to keep the row compact. */}
           <Button
             size="sm"
             variant="ghost"
-            icon={<Tags className="h-3.5 w-3.5" />}
+            className="!px-2"
+            icon={<Tags className="h-4 w-4" />}
             onClick={(e) => {
               e.stopPropagation();
               onMapCategories();
             }}
             title="Map this profile's categories to the main site"
-          >
-            Categories
-          </Button>
+            aria-label="Map categories"
+          />
           <Button
             size="sm"
             variant="ghost"
-            icon={<Settings2 className="h-3.5 w-3.5" />}
+            className="!px-2"
+            icon={<Settings2 className="h-4 w-4" />}
             onClick={(e) => {
               e.stopPropagation();
               onOpen();
             }}
             title="Profile settings"
-          >
-            Settings
-          </Button>
+            aria-label="Profile settings"
+          />
         </div>
       </TD>
     </TR>

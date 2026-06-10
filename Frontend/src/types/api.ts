@@ -165,6 +165,11 @@ export interface ProfileListItem {
   lastScrapedAt: string | null;
   /** Next scheduled crawl (ISO) for active auto profiles, else null. */
   nextScrapeAt: string | null;
+  /** Per-profile product health (from countProductsPerProfile). */
+  productCount?: number;
+  scrapedCount?: number;
+  syncedCount?: number;
+  erroredCount?: number;
 }
 
 export interface ProfilesResponse {

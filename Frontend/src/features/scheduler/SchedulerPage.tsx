@@ -15,7 +15,7 @@ import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
-import { ErrorState, LoadingState, EmptyState } from '@/components/ui/states';
+import { ErrorState, EmptyState } from '@/components/ui/states';
 import { useScheduler, useSchedulerActions } from '@/hooks/useApi';
 import { formatNumber, formatDate, timeAgo, timeUntil } from '@/lib/format';
 import type { SchedulerStatus } from '@/types/api';
@@ -69,7 +69,10 @@ export function SchedulerPage() {
       />
 
       {isLoading ? (
-        <LoadingState label="Loading scheduler…" />
+        <div className="space-y-6">
+          <div className="skeleton h-44 w-full rounded-xl" />
+          <div className="skeleton h-64 w-full rounded-xl" />
+        </div>
       ) : isError ? (
         <ErrorState message={(error as Error).message} onRetry={() => refetch()} />
       ) : data ? (

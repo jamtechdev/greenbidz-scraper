@@ -17,8 +17,12 @@ import { TestResults } from './TestResults';
 interface Props {
   draft: MappingDraft;
   onChange: (patch: Partial<MappingDraft>) => void;
-  /** When set, Save overwrites this existing profile instead of deriving a new file. */
-  editFileName?: string | null;
+  /** When set, Save writes to this exact file (edit or override). */
+  saveFileName?: string | null;
+  /** When true, Save creates a fresh (auto-suffixed) profile for the domain. */
+  createNew?: boolean;
+  /** True when editing an existing profile's mapping. */
+  isEdit?: boolean;
 }
 
 /** Mirrors backend validateProfile so the user sees problems before saving. */
@@ -40,7 +44,7 @@ function validate(draft: MappingDraft): string[] {
   return errs;
 }
 
-export function ReviewStep({ draft, onChange, editFileName }: Props) {
+export function ReviewStep({ draft, onChange, saveFileName, createNew, isEdit }: Props) {
   const [savedAs, setSavedAs] = useState<string | null>(null);
   const [runStarted, setRunStarted] = useState(false);
   const [jobId, setJobId] = useState<string | null>(null);
@@ -86,8 +90,9 @@ export function ReviewStep({ draft, onChange, editFileName }: Props) {
         { ...draft, productUrlPattern: draft.productUrlPattern },
         new Date().toISOString(),
       );
-      // editFileName set → overwrite that exact profile; else backend derives it.
-      return api.saveProfile(editFileName ?? null, profile, runNow);
+      // saveFileName → write that exact file (edit/override); createNew → backend
+      // makes a fresh suffixed profile; else it derives from the domain.
+      return api.saveProfile(saveFileName ?? null, profile, runNow, !!createNew);
     },
     onSuccess: (res) => {
       setSavedAs(res.fileName);
@@ -207,7 +212,16 @@ export function ReviewStep({ draft, onChange, editFileName }: Props) {
           </Labeled>
         </div>
 
-        {dupe && (
+        {createNew && (
+          <div className="mt-3 flex items-start gap-2 rounded-lg border border-accent/40 bg-emerald-900/20 p-3 text-xs text-emerald-200">
+            <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+            <div>
+              Saving will create a <b>new</b> profile for this domain (existing profiles are kept). Give
+              it a distinct name below — e.g. a category.
+            </div>
+          </div>
+        )}
+        {dupe && !createNew && !isEdit && (
           <div className="mt-3 flex items-start gap-2 rounded-lg border border-warn/40 bg-amber-900/20 p-3 text-xs text-amber-200">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
             <div>

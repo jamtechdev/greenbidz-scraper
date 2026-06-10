@@ -11,9 +11,11 @@ import {
   ExternalLink,
   Pencil,
 } from 'lucide-react';
+import toast from 'react-hot-toast';
 import { Drawer } from '@/components/ui/Drawer';
 import { Badge } from '@/components/ui/Badge';
 import { Button } from '@/components/ui/Button';
+import { RelTime } from '@/components/ui/RelTime';
 import {
   useCrawlHistory,
   useDeleteProfile,
@@ -21,6 +23,7 @@ import {
   useUpdateProfileSettings,
 } from '@/hooks/useApi';
 import { useScrapeLock } from '@/hooks/useScrapeLock';
+import { undoableDelete } from '@/lib/undoToast';
 import type { ProfileListItem, ScrapeMode } from '@/types/api';
 import { formatDate, timeAgo, timeUntil } from '@/lib/format';
 
@@ -76,20 +79,43 @@ export function ProfileSettingsDrawer({
 
   const onSave = () => {
     if (!profile) return;
-    update.mutate({
-      fileName: profile.fileName,
-      settings: { scrapeMode: mode, scrapeLimit: limitValue, downloadImages: images, paused },
-    });
+    update.mutate(
+      {
+        fileName: profile.fileName,
+        settings: { scrapeMode: mode, scrapeLimit: limitValue, downloadImages: images, paused },
+      },
+      {
+        onSuccess: () => toast.success('Profile settings saved.'),
+        onError: (e) => toast.error((e as Error).message),
+      },
+    );
   };
 
   const onRun = () => {
     if (!profile) return;
-    run.mutate(profile.fileName, { onSuccess: () => scrapeLock.lock() });
+    run.mutate(profile.fileName, {
+      onSuccess: () => {
+        scrapeLock.lock();
+        toast.success(`Crawl started for “${profile.profileName || profile.fileName}”.`);
+      },
+      onError: (e) => toast.error((e as Error).message),
+    });
   };
 
   const onDelete = () => {
     if (!profile) return;
-    del.mutate(profile.fileName, { onSuccess: onClose });
+    const fileName = profile.fileName;
+    const name = profile.profileName || fileName;
+    onClose();
+    // Deferred delete with Undo — the profile is only removed if not undone.
+    undoableDelete({
+      message: `Deleting profile “${name}”…`,
+      commit: () =>
+        del.mutate(fileName, {
+          onSuccess: () => toast.success(`Profile “${name}” deleted.`),
+          onError: (e) => toast.error((e as Error).message),
+        }),
+    });
   };
 
   const actionsFooter = (
@@ -304,7 +330,7 @@ export function ProfileSettingsDrawer({
                   <tbody>
                     {recent.map((h) => (
                       <tr key={h.id} className="border-b border-line last:border-0">
-                        <td className="px-3 py-2 text-muted">{formatDate(h.timestamp)}</td>
+                        <td className="px-3 py-2 text-muted"><RelTime iso={h.timestamp} /></td>
                         <td className="px-3 py-2 text-ink">+{h.new_products ?? 0} new</td>
                         <td className="px-3 py-2 text-emerald-300">{h.scraped_products ?? 0} scraped</td>
                         <td className="px-3 py-2 text-muted">{h.products_found ?? 0} found</td>

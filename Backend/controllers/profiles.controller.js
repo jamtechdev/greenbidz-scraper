@@ -11,7 +11,7 @@ import {
   profileExists,
   deleteProfile,
 } from '../utils/file-manager.js';
-import { getLastCrawlTimes } from '../database/queries.js';
+import { getLastCrawlTimes, countProductsPerProfile } from '../database/queries.js';
 import { startCrawlJob } from '../services/crawlJob.js';
 
 /** Next scheduled crawl time for the global cron `0 *\/N * * *`. */
@@ -40,6 +40,14 @@ export async function listProfiles(req, res) {
   } catch (err) {
     logger.warn(`Could not load crawl times for profiles: ${err.message}`);
   }
+
+  // Per-profile product health (best-effort — never block the profile list).
+  let statsByFile = {};
+  try {
+    statsByFile = await countProductsPerProfile();
+  } catch (err) {
+    logger.warn(`Could not load per-profile product counts: ${err.message}`);
+  }
   const nextRun = computeNextRun();
 
   const profiles = all
@@ -54,6 +62,8 @@ export async function listProfiles(req, res) {
         const ts = lastByUrl.get(url);
         if (ts && (!lastScrapedAt || new Date(ts) > new Date(lastScrapedAt))) lastScrapedAt = ts;
       }
+
+      const stats = statsByFile[fileName] || { total: 0, scraped: 0, synced: 0, errored: 0 };
 
       return {
         fileName,
@@ -72,6 +82,11 @@ export async function listProfiles(req, res) {
         updatedAt: profile.updatedAt || null,
         lastScrapedAt,
         nextScrapeAt: scrapeMode === 'auto' && !paused ? nextRun : null,
+        // Per-profile product health (see countProductsPerProfile).
+        productCount: stats.total,
+        scrapedCount: stats.scraped,
+        syncedCount: stats.synced,
+        erroredCount: stats.errored,
       };
     });
   res.json({ profiles });
@@ -107,11 +122,27 @@ export async function saveProfile(req, res) {
     return res.status(400).json({ error: 'Profile invalid', details: errors });
   }
 
+  const createNew = body.createNew === true;
   if (!fileName) {
     const slug = (profile.domain || 'site').replace(/[^a-z0-9]+/gi, '').toLowerCase();
     fileName = `profile_${slug}.json`;
+    // Multiple profiles per domain: when explicitly creating a new one, find a
+    // free suffixed filename instead of overwriting the existing profile.
+    if (createNew) {
+      let n = 2;
+      let candidate = fileName;
+      // eslint-disable-next-line no-await-in-loop
+      while (await profileExists(candidate)) {
+        candidate = `profile_${slug}_${n}.json`;
+        n += 1;
+      }
+      fileName = candidate;
+    }
   }
   if (!fileName.endsWith('.json')) fileName += '.json';
+  // Keep the profileId aligned with the (possibly suffixed) filename so multiple
+  // same-domain profiles stay distinct.
+  profile.profileId = fileName.replace(/\.json$/, '');
 
   const overwrote = await profileExists(fileName);
   const full = await writeProfile(fileName, profile);

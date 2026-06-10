@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import { useQueryClient } from '@tanstack/react-query';
 import { History, Loader2, X, RefreshCw, UploadCloud, ExternalLink } from 'lucide-react';
 import toast from 'react-hot-toast';
@@ -28,10 +29,15 @@ function statusTone(s: SyncRunStatus): 'yes' | 'no' | 'warn' | 'info' | 'neutral
   return 'neutral';
 }
 
+const VALID_STATUSES = ['processing', 'completed', 'partial', 'failed', 'cancelled'];
+
 export function HistoryTab() {
   const qc = useQueryClient();
   const profilesQ = useProfiles();
-  const [filters, setFilters] = useState({ profile: '', status: 'all', order: 'desc', limit: 50 });
+  const [params] = useSearchParams();
+  // Honor ?status= from a deep link (e.g. after starting a background sync).
+  const initialStatus = VALID_STATUSES.includes(params.get('status') || '') ? (params.get('status') as string) : 'all';
+  const [filters, setFilters] = useState({ profile: '', status: initialStatus, order: 'desc', limit: 50 });
   const setF = (k: string, v: string | number) => setFilters((p) => ({ ...p, [k]: v }));
 
   const runsQ = useSyncRuns(filters);

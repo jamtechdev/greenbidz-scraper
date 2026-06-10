@@ -4,7 +4,6 @@ import {
   Package,
   History,
   CalendarClock,
-  Settings,
   MousePointerClick,
   UploadCloud,
   type LucideIcon,
@@ -35,7 +34,7 @@ export const navGroups: NavGroup[] = [
     ],
   },
   {
-    heading: 'Data',
+    heading: 'Data Management',
     items: [
       { to: '/products', label: 'Products', icon: Package, badge: 'products' },
       { to: '/sync-manager', label: 'Sync Manager', icon: UploadCloud },
@@ -49,7 +48,7 @@ export const navGroups: NavGroup[] = [
       { to: '/profiles', label: 'Profiles', icon: FileCode2, badge: 'profiles' },
       // { to: '/pending', label: 'Pending', icon: ClipboardList, soon: true },
       { to: '/scheduler', label: 'Scheduler', icon: CalendarClock },
-      { to: '/settings', label: 'Settings', icon: Settings, soon: true },
+      // { to: '/settings', label: 'Settings', icon: Settings, soon: true },
     ],
   },
 ];

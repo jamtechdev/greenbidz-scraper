@@ -37,10 +37,13 @@ export function EmptyState({
   title,
   hint,
   icon,
+  action,
 }: {
   title: string;
   hint?: ReactNode;
   icon?: ReactNode;
+  /** Optional call-to-action (e.g. a "Create your first scraper" button). */
+  action?: ReactNode;
 }) {
   return (
     <div className="flex flex-col items-center gap-2 py-12 text-center">
@@ -49,6 +52,7 @@ export function EmptyState({
       </div>
       <p className="text-sm font-medium text-ink">{title}</p>
       {hint && <p className="max-w-md text-xs text-muted">{hint}</p>}
+      {action && <div className="mt-3">{action}</div>}
     </div>
   );
 }

@@ -1,7 +1,14 @@
 import { useMutation, useQuery, useQueryClient, keepPreviousData } from '@tanstack/react-query';
 import { api, type ProductsQuery } from '@/lib/api';
 import { queryKeys } from '@/lib/queryKeys';
-import type { ProfileSettings, SyncBatchInput, SyncRunInput, SyncSchedulerConfig } from '@/types/api';
+import type {
+  ProfileSettings,
+  SyncBatchInput,
+  SyncRunInput,
+  SyncSchedulerConfig,
+  SchedulerStatus,
+  SyncSchedulerStatus,
+} from '@/types/api';
 
 export function useDashboardState() {
   return useQuery({
@@ -128,9 +135,22 @@ export function useSchedulerActions() {
     qc.invalidateQueries({ queryKey: ['crawl-history'] });
     qc.invalidateQueries({ queryKey: queryKeys.state });
   };
+  // Optimistically flip `paused` so the toggle feels instant; roll back on error.
+  const optimistic = (paused: boolean) => ({
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: queryKeys.scheduler });
+      const prev = qc.getQueryData<SchedulerStatus>(queryKeys.scheduler);
+      if (prev) qc.setQueryData<SchedulerStatus>(queryKeys.scheduler, { ...prev, paused, running: !paused });
+      return { prev };
+    },
+    onError: (_e: unknown, _v: void, ctx: { prev?: SchedulerStatus } | undefined) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.scheduler, ctx.prev);
+    },
+    onSettled,
+  });
   const runNow = useMutation({ mutationFn: api.runSchedulerNow, onSettled });
-  const pause = useMutation({ mutationFn: api.pauseScheduler, onSettled });
-  const resume = useMutation({ mutationFn: api.resumeScheduler, onSettled });
+  const pause = useMutation({ mutationFn: api.pauseScheduler, ...optimistic(true) });
+  const resume = useMutation({ mutationFn: api.resumeScheduler, ...optimistic(false) });
   return { runNow, pause, resume };
 }
 
@@ -306,9 +326,22 @@ export function useSyncSchedulerActions() {
     qc.invalidateQueries({ queryKey: queryKeys.syncScheduler });
     qc.invalidateQueries({ queryKey: ['sync-runs'] });
   };
+  // Optimistically flip `paused` so the toggle feels instant; roll back on error.
+  const optimistic = (paused: boolean) => ({
+    onMutate: async () => {
+      await qc.cancelQueries({ queryKey: queryKeys.syncScheduler });
+      const prev = qc.getQueryData<SyncSchedulerStatus>(queryKeys.syncScheduler);
+      if (prev) qc.setQueryData<SyncSchedulerStatus>(queryKeys.syncScheduler, { ...prev, paused, running: !paused });
+      return { prev };
+    },
+    onError: (_e: unknown, _v: void, ctx: { prev?: SyncSchedulerStatus } | undefined) => {
+      if (ctx?.prev) qc.setQueryData(queryKeys.syncScheduler, ctx.prev);
+    },
+    onSettled,
+  });
   const runNow = useMutation({ mutationFn: api.runSyncSchedulerNow, onSettled });
-  const pause = useMutation({ mutationFn: api.pauseSyncScheduler, onSettled });
-  const resume = useMutation({ mutationFn: api.resumeSyncScheduler, onSettled });
+  const pause = useMutation({ mutationFn: api.pauseSyncScheduler, ...optimistic(true) });
+  const resume = useMutation({ mutationFn: api.resumeSyncScheduler, ...optimistic(false) });
   const saveConfig = useMutation({ mutationFn: (c: SyncSchedulerConfig) => api.saveSyncSchedulerConfig(c), onSettled });
   return { runNow, pause, resume, saveConfig };
 }

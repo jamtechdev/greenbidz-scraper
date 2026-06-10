@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Package, ImageIcon, UploadCloud, ChevronLeft, ChevronRight, CheckCircle2, Trash2, RefreshCw } from 'lucide-react';
+import { Search, Package, ImageIcon, UploadCloud, ChevronLeft, ChevronRight, CheckCircle2, Trash2, RefreshCw, MousePointerClick } from 'lucide-react';
 import toast from 'react-hot-toast';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { Card, CardBody } from '@/components/ui/Card';
@@ -11,7 +11,9 @@ import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
 import { ErrorState, TableSkeleton, EmptyState } from '@/components/ui/states';
 import { useProducts, useDeleteProducts, useProfiles, useRescrape } from '@/hooks/useApi';
 import type { Product } from '@/types/api';
-import { formatPrice, timeAgo } from '@/lib/format';
+import { formatPrice } from '@/lib/format';
+import { RelTime } from '@/components/ui/RelTime';
+import { undoableDelete } from '@/lib/undoToast';
 import { productImageUrl } from '@/lib/productImage';
 import { cn } from '@/lib/cn';
 import { ProductDetailDrawer } from './ProductDetailDrawer';
@@ -69,11 +71,18 @@ export function ProductsPage() {
   const selectablePageRows = rows.filter((p) => !p.synced);
 
   const onDeleteSelected = () => {
-    del.mutate([...selectedIds], {
-      onSuccess: () => {
-        setSelectedIds(new Set());
-        setShowDelete(false);
-      },
+    const ids = [...selectedIds];
+    const n = ids.length;
+    setSelectedIds(new Set());
+    setShowDelete(false);
+    // Deferred delete with Undo — nothing is removed until the toast elapses.
+    undoableDelete({
+      message: `Deleting ${n} product${n === 1 ? '' : 's'}…`,
+      commit: () =>
+        del.mutate(ids, {
+          onSuccess: () => toast.success(`Deleted ${n} product${n === 1 ? '' : 's'}.`),
+          onError: (e) => toast.error((e as Error).message),
+        }),
     });
   };
 
@@ -175,8 +184,19 @@ export function ProductsPage() {
           ) : !rows.length ? (
             <EmptyState
               title="No products match"
-              hint={search ? 'Try a different search.' : 'Run a crawl to discover products.'}
+              hint={
+                search || filter !== 'all' || profileFilter
+                  ? 'Try a different search or filter.'
+                  : 'Build a scraper profile, then run a crawl to discover products.'
+              }
               icon={<Package className="h-5 w-5" />}
+              action={
+                search || filter !== 'all' || profileFilter ? undefined : (
+                  <Button icon={<MousePointerClick className="h-4 w-4" />} onClick={() => navigate('/scraper/new')}>
+                    Create your first scraper
+                  </Button>
+                )
+              }
             />
           ) : (
             <>
@@ -252,7 +272,9 @@ export function ProductsPage() {
                         )}
                       </div>
                     </TD>
-                    <TD className="whitespace-nowrap text-xs text-muted">{timeAgo(p.last_seen_at)}</TD>
+                    <TD className="whitespace-nowrap text-xs text-muted">
+                      <RelTime iso={p.last_seen_at} />
+                    </TD>
                   </TR>
                 ))}
               </TBody>
@@ -306,8 +328,9 @@ export function ProductsPage() {
           </>
         }
       >
-        This permanently removes <b className="text-ink">{selectedIds.size}</b> product listing
-        {selectedIds.size === 1 ? '' : 's'} from the scraper database. This can’t be undone.
+        This removes <b className="text-ink">{selectedIds.size}</b> product listing
+        {selectedIds.size === 1 ? '' : 's'} from the scraper database. You’ll get a few seconds to
+        undo before it’s permanent.
       </Modal>
     </>
   );

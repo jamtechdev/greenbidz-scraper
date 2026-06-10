@@ -153,10 +153,10 @@ export const api = {
       body: JSON.stringify({ url }),
     }),
 
-  saveProfile: (fileName: string | null, profile: DomProfile, runNow = true) =>
+  saveProfile: (fileName: string | null, profile: DomProfile, runNow = true, createNew = false) =>
     request<SaveProfileResponse>('/save-profile', {
       method: 'POST',
-      body: JSON.stringify({ fileName, profile, runNow }),
+      body: JSON.stringify({ fileName, profile, runNow, createNew }),
     }),
 
   getProfiles: () => request<ProfilesResponse>('/profiles'),

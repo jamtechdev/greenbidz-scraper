@@ -1,4 +1,4 @@
-import { Link } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import {
   Package,
   CheckCircle2,
@@ -7,18 +7,39 @@ import {
   ClipboardList,
   ArrowRight,
   Activity,
+  MousePointerClick,
 } from 'lucide-react';
 import { PageHeader } from '@/components/layout/PageHeader';
 import { StatCard } from '@/components/ui/StatCard';
 import { Card, CardBody, CardHeader } from '@/components/ui/Card';
 import { Badge } from '@/components/ui/Badge';
+import { Button } from '@/components/ui/Button';
 import { Table, TBody, TD, TH, THead, TR } from '@/components/ui/Table';
-import { ErrorState, LoadingState, EmptyState } from '@/components/ui/states';
+import { ErrorState, EmptyState, TableSkeleton } from '@/components/ui/states';
+import { RelTime } from '@/components/ui/RelTime';
 import { useCrawlHistory, useDashboardState, useProducts } from '@/hooks/useApi';
-import { formatNumber, formatDate, formatDuration, timeAgo, hostFromUrl } from '@/lib/format';
+import { formatNumber, formatDuration, timeAgo, hostFromUrl } from '@/lib/format';
 import { CrawlVolumeChart } from './CrawlVolumeChart';
 
+/** Vertical list-shaped skeleton for the dashboard side panels. */
+function ListSkeleton({ rows = 5 }: { rows?: number }) {
+  return (
+    <div className="divide-y divide-line/60">
+      {Array.from({ length: rows }).map((_, i) => (
+        <div key={i} className="flex items-center justify-between gap-3 px-5 py-3">
+          <div className="min-w-0 flex-1 space-y-1.5">
+            <div className="skeleton h-3.5 w-2/3" />
+            <div className="skeleton h-3 w-1/3" />
+          </div>
+          <div className="skeleton h-5 w-12 rounded-full" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export function DashboardPage() {
+  const navigate = useNavigate();
   const state = useDashboardState();
   const products = useProducts({ limit: 6 });
   const crawls = useCrawlHistory(50);
@@ -81,7 +102,7 @@ export function DashboardPage() {
           />
           <CardBody>
             {crawls.isLoading ? (
-              <LoadingState />
+              <div className="skeleton h-64 w-full" />
             ) : crawls.isError ? (
               <ErrorState
                 message={(crawls.error as Error).message}
@@ -102,9 +123,17 @@ export function DashboardPage() {
           />
           <CardBody className="p-0">
             {state.isLoading ? (
-              <LoadingState />
+              <ListSkeleton />
             ) : !state.data?.profiles.length ? (
-              <EmptyState title="No profiles yet" hint="Create one in the Mapping Studio." />
+              <EmptyState
+                title="No profiles yet"
+                hint="Create one in the visual Mapping Studio to start scraping."
+                action={
+                  <Button size="sm" icon={<MousePointerClick className="h-4 w-4" />} onClick={() => navigate('/scraper/new')}>
+                    Create your first scraper
+                  </Button>
+                }
+              />
             ) : (
               <ul className="divide-y divide-line/60">
                 {state.data.profiles.slice(0, 6).map((p) => (
@@ -137,7 +166,7 @@ export function DashboardPage() {
           />
           <CardBody className="p-0">
             {crawls.isLoading ? (
-              <LoadingState />
+              <TableSkeleton rows={6} cols={4} />
             ) : !crawls.data?.history.length ? (
               <EmptyState title="No runs yet" />
             ) : (
@@ -175,7 +204,7 @@ export function DashboardPage() {
           />
           <CardBody className="p-0">
             {products.isLoading ? (
-              <LoadingState />
+              <ListSkeleton />
             ) : !products.data?.products.length ? (
               <EmptyState title="No products yet" hint="Run a crawl to discover products." />
             ) : (
@@ -186,7 +215,7 @@ export function DashboardPage() {
                       <div className="truncate text-sm font-medium text-ink">
                         {p.title || <span className="text-muted">Untitled</span>}
                       </div>
-                      <div className="truncate text-xs text-muted">{formatDate(p.last_seen_at)}</div>
+                      <div className="truncate text-xs text-muted"><RelTime iso={p.last_seen_at} /></div>
                     </div>
                     <Badge tone={p.scraped ? 'yes' : 'no'}>{p.scraped ? 'scraped' : 'pending'}</Badge>
                   </li>
