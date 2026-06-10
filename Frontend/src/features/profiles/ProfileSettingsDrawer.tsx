@@ -332,7 +332,7 @@ export function ProfileSettingsDrawer({
                       <tr key={h.id} className="border-b border-line last:border-0">
                         <td className="px-3 py-2 text-muted"><RelTime iso={h.timestamp} /></td>
                         <td className="px-3 py-2 text-ink">+{h.new_products ?? 0} new</td>
-                        <td className="px-3 py-2 text-emerald-300">{h.scraped_products ?? 0} scraped</td>
+                        <td className="px-3 py-2 text-emerald-300 light:text-emerald-600">{h.scraped_products ?? 0} scraped</td>
                         <td className="px-3 py-2 text-muted">{h.products_found ?? 0} found</td>
                         <td className="px-3 py-2">
                           <Badge tone={h.status === 'completed' ? 'yes' : h.status === 'failed' ? 'no' : 'neutral'}>

@@ -171,7 +171,7 @@ function ProfileRow({
               <UploadCloud className="h-3 w-3" /> {formatNumber(p.syncedCount ?? 0)}
             </span>
             {(p.scrapedCount ?? 0) > 0 && (
-              <span className="inline-flex items-center gap-1 text-emerald-300" title={`${p.scrapedCount} scraped`}>
+              <span className="inline-flex items-center gap-1 text-emerald-300 light:text-emerald-600" title={`${p.scrapedCount} scraped`}>
                 <CheckCircle2 className="h-3 w-3" /> {formatNumber(p.scrapedCount ?? 0)}
               </span>
             )}

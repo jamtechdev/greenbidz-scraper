@@ -4,13 +4,13 @@ import { cn } from '@/lib/cn';
 type Tone = 'api' | 'dom' | 'yes' | 'no' | 'neutral' | 'warn' | 'info';
 
 const tones: Record<Tone, string> = {
-  api: 'bg-sky-900/60 text-sky-200',
-  dom: 'bg-amber-900/40 text-amber-200',
-  yes: 'bg-emerald-900/50 text-emerald-300',
-  no: 'bg-red-900/40 text-red-300',
+  api: 'bg-sky-900/60 text-sky-200 light:bg-sky-100 light:text-sky-700',
+  dom: 'bg-amber-900/40 text-amber-200 light:bg-amber-100 light:text-amber-700',
+  yes: 'bg-emerald-900/50 text-emerald-300 light:bg-emerald-100 light:text-emerald-700',
+  no: 'bg-red-900/40 text-red-300 light:bg-red-100 light:text-red-700',
   neutral: 'bg-panel2 text-muted',
-  warn: 'bg-amber-900/40 text-amber-200',
-  info: 'bg-sky-900/50 text-sky-200',
+  warn: 'bg-amber-900/40 text-amber-200 light:bg-amber-100 light:text-amber-700',
+  info: 'bg-sky-900/50 text-sky-200 light:bg-sky-100 light:text-sky-700',
 };
 
 export function Badge({

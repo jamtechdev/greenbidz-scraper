@@ -1,28 +1,33 @@
 import type { Config } from 'tailwindcss';
+import plugin from 'tailwindcss/plugin';
 
-// Palette carried over from the original review UI, extended into a full scale
-// so components read cleanly (bg / panel / panel2 / line / muted / accent…).
+// Semantic palette driven by CSS variables (see src/index.css). The dark theme
+// is the default (:root); a `light` class on <html> overrides the variables.
+// Colors are stored as "R G B" channels so Tailwind's opacity modifiers
+// (e.g. bg-accent/40) keep working via rgb(var(--x) / <alpha-value>).
+const withVar = (name: string) => `rgb(var(${name}) / <alpha-value>)`;
+
 export default {
   content: ['./index.html', './src/**/*.{ts,tsx}'],
   theme: {
     extend: {
       colors: {
-        bg: '#0f172a',
-        panel: '#1e293b',
-        panel2: '#273449',
-        line: '#334155',
-        ink: '#e2e8f0',
-        muted: '#94a3b8',
+        bg: withVar('--c-bg'),
+        panel: withVar('--c-panel'),
+        panel2: withVar('--c-panel2'),
+        line: withVar('--c-line'),
+        ink: withVar('--c-ink'),
+        muted: withVar('--c-muted'),
         accent: {
-          DEFAULT: '#22c55e',
-          ink: '#04210f',
+          DEFAULT: withVar('--c-accent'),
+          ink: withVar('--c-accent-ink'),
         },
         sky2: {
-          DEFAULT: '#38bdf8',
-          ink: '#04212e',
+          DEFAULT: withVar('--c-sky2'),
+          ink: withVar('--c-sky2-ink'),
         },
-        warn: '#f59e0b',
-        danger: '#ef4444',
+        warn: withVar('--c-warn'),
+        danger: withVar('--c-danger'),
       },
       fontFamily: {
         sans: ['Inter', 'system-ui', '-apple-system', 'Segoe UI', 'Roboto', 'sans-serif'],
@@ -32,7 +37,7 @@ export default {
         xl: '14px',
       },
       boxShadow: {
-        card: '0 1px 2px rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.5)',
+        card: 'var(--shadow-card)',
         glow: '0 0 0 1px rgba(56,189,248,0.4), 0 0 20px -4px rgba(56,189,248,0.4)',
       },
       keyframes: {
@@ -59,5 +64,12 @@ export default {
       },
     },
   },
-  plugins: [],
+  plugins: [
+    // `light:` targets elements only when <html> has the `light` class, so the
+    // few intentionally-dark utilities (badges, status text) can be overridden
+    // for the light theme without touching every call site.
+    plugin(({ addVariant }) => {
+      addVariant('light', 'html.light &');
+    }),
+  ],
 } satisfies Config;

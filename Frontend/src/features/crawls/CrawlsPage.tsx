@@ -123,7 +123,7 @@ export function CrawlsPage() {
                     </TD>
                     <TD>{formatNumber(r.products_found)}</TD>
                     <TD className="text-accent">{formatNumber(r.new_products)}</TD>
-                    <TD className="text-emerald-300">{formatNumber(r.scraped_products)}</TD>
+                    <TD className="text-emerald-300 light:text-emerald-600">{formatNumber(r.scraped_products)}</TD>
                     <TD className={cn((r.failed_products ?? 0) > 0 && 'text-danger')}>
                       {formatNumber(r.failed_products)}
                     </TD>

@@ -4,6 +4,7 @@ import { useIsFetching, useQueryClient } from '@tanstack/react-query';
 import { Button } from '@/components/ui/Button';
 import { useDashboardState, useActiveCrawls, useActiveSyncRuns } from '@/hooks/useApi';
 import { useLayout } from './layout-context';
+import { ThemeToggle } from './ThemeToggle';
 
 export function TopBar({ onMenu }: { onMenu: () => void }) {
   const fetching = useIsFetching() > 0;
@@ -58,6 +59,9 @@ export function TopBar({ onMenu }: { onMenu: () => void }) {
           {activeTotal} running
         </Link>
       )}
+
+      {/* Theme toggle (light / dark) */}
+      <ThemeToggle />
 
       {/* Backend status light (red = offline, green = connected) */}
       <span

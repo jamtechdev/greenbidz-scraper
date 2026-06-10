@@ -114,7 +114,7 @@ export function SettingsTab() {
             <Fact icon={<CalendarClock className="h-4 w-4" />} label="Targets" value={`${(cfg?.targets ?? s.config.targets).length}`} sub="per-target intervals" />
             <Fact icon={<CheckCircle2 className="h-4 w-4" />} label="Last cycle" value={s.lastSummary ? `${formatNumber(s.lastSummary.runs)} run(s)` : '—'} sub={s.lastSummary ? `${s.lastSummary.products} product(s)` : undefined} />
           </div>
-          {s.lastError && <div className="rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300">Last error: {s.lastError}</div>}
+          {s.lastError && <div className="rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300 light:bg-red-50 light:text-red-700">Last error: {s.lastError}</div>}
         </CardBody>
       </Card>
 

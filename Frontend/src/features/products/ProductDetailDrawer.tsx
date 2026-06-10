@@ -77,7 +77,7 @@ export function ProductDetailDrawer({
           </div>
 
           {full.last_error && (
-            <div className="rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300">
+            <div className="rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300 light:bg-red-50 light:text-red-700">
               <div className="mb-1 font-semibold uppercase tracking-wide">Last error</div>
               {full.last_error}
             </div>

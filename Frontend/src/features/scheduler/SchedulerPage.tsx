@@ -150,7 +150,7 @@ function StatusCard({ s }: { s: SchedulerStatus }) {
               <Stat label="Listings" value={s.lastSummary.listings} />
               <Stat label="Found" value={s.lastSummary.found} />
               <Stat label="New" value={s.lastSummary.new} tone="text-accent" />
-              <Stat label="Scraped" value={s.lastSummary.scraped} tone="text-emerald-300" />
+              <Stat label="Scraped" value={s.lastSummary.scraped} tone="text-emerald-300 light:text-emerald-600" />
               <Stat
                 label="Failed"
                 value={s.lastSummary.failed}
@@ -161,7 +161,7 @@ function StatusCard({ s }: { s: SchedulerStatus }) {
         )}
 
         {s.lastError && (
-          <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300">
+          <div className="flex items-start gap-2 rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300 light:bg-red-50 light:text-red-700">
             <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
             <span>Last cycle error: {s.lastError}</span>
           </div>

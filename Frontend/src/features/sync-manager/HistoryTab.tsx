@@ -173,7 +173,7 @@ export function HistoryTab() {
                       <Badge tone="neutral">{r.trigger}</Badge>
                     </TD>
                     <TD>{formatNumber(r.total)}</TD>
-                    <TD className="text-emerald-300">{formatNumber(r.success_count)}</TD>
+                    <TD className="text-emerald-300 light:text-emerald-600">{formatNumber(r.success_count)}</TD>
                     <TD className={cn((r.failed_count ?? 0) > 0 && 'text-danger')}>{formatNumber(r.failed_count)}</TD>
                     <TD className="whitespace-nowrap text-muted">{formatDuration(r.duration_seconds)}</TD>
                     <TD>
@@ -226,14 +226,14 @@ export function HistoryTab() {
           <div className="space-y-3">
             <div className="flex flex-wrap gap-4 text-sm">
               <span><b className="text-ink">{runDetail.data.run.total}</b> <span className="text-muted">total</span></span>
-              <span className="text-emerald-300">{runDetail.data.run.success_count} success</span>
+              <span className="text-emerald-300 light:text-emerald-600">{runDetail.data.run.success_count} success</span>
               <span className={(runDetail.data.run.failed_count ?? 0) > 0 ? 'text-danger' : 'text-muted'}>
                 {runDetail.data.run.failed_count} failed
               </span>
               <Badge tone={statusTone(runDetail.data.run.status)}>{runDetail.data.run.status}</Badge>
             </div>
             {runDetail.data.run.error_message && (
-              <div className="rounded-lg border border-danger/30 bg-red-900/20 p-2.5 text-xs text-red-300">
+              <div className="rounded-lg border border-danger/30 bg-red-900/20 p-2.5 text-xs text-red-300 light:bg-red-50 light:text-red-700">
                 {runDetail.data.run.error_message}
               </div>
             )}

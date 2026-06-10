@@ -58,7 +58,7 @@ export function LoginPage() {
             </p>
 
             {error && (
-              <div className="mt-5 flex items-start gap-2 rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300">
+              <div className="mt-5 flex items-start gap-2 rounded-lg border border-danger/30 bg-red-900/20 p-3 text-xs text-red-300 light:bg-red-50 light:text-red-700">
                 <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                 <span>{error}</span>
               </div>

@@ -1,7 +1,15 @@
 <!doctype html>
-<html lang="en" class="dark">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!-- Apply the saved theme before first paint to avoid a flash of the wrong theme. -->
+    <script>
+      try {
+        if (localStorage.getItem('gb_theme') === 'light') {
+          document.documentElement.classList.add('light');
+        }
+      } catch (e) {}
+    </script>
     <link rel="icon" type="image/png" href="/src/assets/greenbidz_logo.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>GreenBidz Product Scraper</title>
