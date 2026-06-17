@@ -237,8 +237,17 @@ function TestResultModal({
               <table className="w-full text-sm">
                 <tbody>
                   {mappedFields.map((f) => {
+                    const rawVal = r.fields?.[f.key];
+                    // A `table`-type field comes back as a { label: value } object —
+                    // render it as a nested key/value table, not "[object Object]".
+                    const specObj =
+                      (f.type === 'table' || f.type === 'keyValueTable') &&
+                      rawVal &&
+                      typeof rawVal === 'object'
+                        ? (rawVal as Record<string, unknown>)
+                        : null;
                     const val = fieldValue(r, f.key);
-                    const empty = val.trim() === '';
+                    const empty = specObj ? Object.keys(specObj).length === 0 : val.trim() === '';
                     const text = f.type === 'html' || f.key === 'description' ? htmlToText(val) : val;
                     return (
                       <tr key={f.key} className="border-b border-line/60 align-top last:border-0">
@@ -251,6 +260,8 @@ function TestResultModal({
                             <span className={f.required ? 'text-danger' : 'text-muted'}>
                               {f.required ? '⚠ missing (required)' : '—'}
                             </span>
+                          ) : specObj ? (
+                            <SpecKV obj={specObj} />
                           ) : (
                             <span className="whitespace-pre-wrap break-words text-ink">{text.slice(0, 600)}</span>
                           )}
@@ -284,6 +295,22 @@ function TestResultModal({
         </div>
       )}
     </Drawer>
+  );
+}
+
+/** Render a `table`-type field's { label: value } object as a key/value table. */
+function SpecKV({ obj }: { obj: Record<string, unknown> }) {
+  return (
+    <table className="w-full text-xs">
+      <tbody>
+        {Object.entries(obj).map(([k, v]) => (
+          <tr key={k} className="align-top">
+            <td className="py-0.5 pr-3 text-muted">{k}</td>
+            <td className="py-0.5 break-words text-ink">{v == null ? '—' : String(v)}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }
 

@@ -7,6 +7,16 @@
 import { readAllProfiles } from '../utils/file-manager.js';
 import { extractDomain } from '../utils/validators.js';
 
+/** Lower-case a host and drop a leading "www." so www/non-www compare equal. */
+function stripWww(host) {
+  return host ? String(host).replace(/^www\./i, '').toLowerCase() : host;
+}
+
+/** True when two hosts are the same ignoring case and a leading "www.". */
+function sameHost(a, b) {
+  return !!a && !!b && stripWww(a) === stripWww(b);
+}
+
 /**
  * Convert a concrete URL into a generalised regex pattern by replacing numeric
  * path/identifier segments with `\d+`.
@@ -84,7 +94,7 @@ export async function findMatchingProfile(url) {
     .filter((entry) => entry.profile && profileMatchesUrl(url, entry.profile))
     .map((entry) => ({
       ...entry,
-      domainMatch: entry.profile.domain === domain,
+      domainMatch: sameHost(entry.profile.domain, domain),
       specificity: (entry.profile.urlPattern || '').length,
     }));
 
@@ -117,7 +127,7 @@ export async function findApiProfileForListing(listingUrl) {
     const p = entry.profile;
     if (!p || p.source !== 'api') continue;
     const listingUrls = Array.isArray(p.listingUrls) ? p.listingUrls : [];
-    if (listingUrls.includes(listingUrl) || p.domain === host) {
+    if (listingUrls.includes(listingUrl) || sameHost(p.domain, host)) {
       return { fileName: entry.fileName, profile: p };
     }
   }
@@ -148,7 +158,7 @@ export async function findDomProfileForListing(listingUrl) {
     if (listingUrls.includes(listingUrl)) {
       return { fileName: entry.fileName, profile: p };
     }
-    if (!domainFallback && p.domain === host && p.pagination) {
+    if (!domainFallback && sameHost(p.domain, host) && p.pagination) {
       domainFallback = { fileName: entry.fileName, profile: p };
     }
   }

@@ -263,6 +263,16 @@ export function MappingStudioPage() {
   const setType = useCallback((key: string, type: FieldType) => {
     setDraft((d) => ({ ...d, fields: d.fields.map((f) => (f.key === key ? { ...f, type } : f)) }));
   }, []);
+  // Manually edit a field's selector (override the picked one). Clearing the
+  // text unsets the mapping (so the field reverts to its unmapped state).
+  const setSelector = useCallback((key: string, selector: string) => {
+    setDraft((d) => ({
+      ...d,
+      fields: d.fields.map((f) =>
+        f.key === key ? { ...f, selector: selector.trim() ? selector : undefined } : f,
+      ),
+    }));
+  }, []);
   const removeImage = useCallback((index: number) => {
     setDraft((d) => ({ ...d, images: d.images.filter((_, i) => i !== index) }));
   }, []);
@@ -394,6 +404,7 @@ export function MappingStudioPage() {
                 onRemoveField={removeField}
                 onToggleRequired={toggleRequired}
                 onSetType={setType}
+                onSetSelector={setSelector}
                 onRemoveImage={removeImage}
                 onSetCurrency={(c) => update({ priceCurrency: c })}
                 countMatches={countMatches}

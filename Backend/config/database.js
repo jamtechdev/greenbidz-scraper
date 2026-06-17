@@ -87,6 +87,17 @@ export async function getConnection() {
 }
 
 /**
+ * Create a brand-new standalone connection (NOT from the pool). Use this for
+ * one-off maintenance like DDL after a multi-statement run: a pooled connection
+ * that just executed a multipleStatements query can hang on a follow-up
+ * prepared statement, so a fresh connection avoids that. Caller must `.end()`.
+ * @returns {Promise<import('mysql2/promise').Connection>}
+ */
+export async function createStandaloneConnection() {
+  return mysql.createConnection(buildConfig());
+}
+
+/**
  * Run a function inside a transaction, committing on success and rolling back
  * on error.
  * @template T

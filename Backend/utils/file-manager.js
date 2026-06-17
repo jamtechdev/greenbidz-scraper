@@ -69,6 +69,25 @@ function profileColumns(fileName, profile) {
 }
 
 /**
+ * Coerce a stored `config` into an object. The column is LONGTEXT holding JSON,
+ * and `raw: true` reads bypass Sequelize's DataTypes.JSON parsing — so MySQL
+ * hands the value back as a STRING. Parse it here (defensively: already-object
+ * values, e.g. a native JSON column, pass straight through).
+ * @param {string|object} config
+ * @returns {object}
+ */
+function parseConfig(config) {
+  if (config && typeof config === 'string') {
+    try {
+      return JSON.parse(config);
+    } catch {
+      return {};
+    }
+  }
+  return config || {};
+}
+
+/**
  * Read a profile by its file_name key from the database.
  * @param {string} fileName - e.g. "profile_101lab.json".
  * @returns {Promise<object>} The stored profile object.
@@ -76,7 +95,7 @@ function profileColumns(fileName, profile) {
 export async function readProfile(fileName) {
   const row = await Profile.findOne({ where: { file_name: fileName }, raw: true });
   if (!row) throw new Error(`Profile not found: ${fileName}`);
-  return row.config;
+  return parseConfig(row.config);
 }
 
 /**
@@ -85,7 +104,7 @@ export async function readProfile(fileName) {
  */
 export async function readAllProfiles() {
   const rows = await Profile.findAll({ order: [['file_name', 'ASC']], raw: true });
-  return rows.map((r) => ({ fileName: r.file_name, profile: r.config }));
+  return rows.map((r) => ({ fileName: r.file_name, profile: parseConfig(r.config) }));
 }
 
 /**

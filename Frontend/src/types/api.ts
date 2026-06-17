@@ -525,11 +525,15 @@ export interface ScrapeProgressResponse {
 /** The DOM-source mapping profile the visual builder produces & saves. */
 export interface DomFieldDef {
   selector: string;
-  type: 'text' | 'html' | 'attr' | 'number';
+  type: 'text' | 'html' | 'attr' | 'number' | 'table' | 'keyValueTable';
   required?: boolean;
   attr?: string;
   xpath?: string;
   sampleValue?: string;
+  // For 'keyValueTable': `selector` matches the repeating rows; these locate the
+  // label & value within each row.
+  keySelector?: string;
+  valueSelector?: string;
 }
 
 export interface DomProfile {

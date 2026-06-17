@@ -43,7 +43,7 @@ export interface NavigateMessage {
 
 export type IframeMessage = PickedMessage | ReadyMessage | HoverMessage | NavigateMessage;
 
-export type FieldType = 'text' | 'html' | 'attr' | 'number';
+export type FieldType = 'text' | 'html' | 'attr' | 'number' | 'table' | 'keyValueTable';
 
 /** One mapped detail field (title, price, description, or custom). */
 export interface FieldDraft {

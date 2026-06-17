@@ -72,6 +72,26 @@ function asArray(value) {
   return [];
 }
 
+/**
+ * Coerce a JSON-object column to an object. JSON columns stored as LONGTEXT come
+ * back as strings under `raw: true` (Sequelize skips type parsing), so parse
+ * defensively. Already-object values pass through.
+ * @param {*} value
+ * @returns {object}
+ */
+function asObject(value) {
+  if (value && typeof value === 'object') return value;
+  if (typeof value === 'string') {
+    try {
+      const parsed = JSON.parse(value);
+      return parsed && typeof parsed === 'object' ? parsed : {};
+    } catch {
+      return {};
+    }
+  }
+  return {};
+}
+
 // ── products: discovery queue (the `scraped` flag lives here now) ────────────
 
 /**
@@ -880,6 +900,7 @@ export async function listSyncRuns({ profile, status, order = 'desc', limit = 50
     offset: off,
     raw: true,
   });
+  for (const r of rows) r.filters_json = asObject(r.filters_json);
   return { runs: rows, total: count };
 }
 
@@ -887,6 +908,7 @@ export async function listSyncRuns({ profile, status, order = 'desc', limit = 50
 export async function getSyncRunWithItems(id) {
   const run = await SyncRun.findByPk(id, { raw: true });
   if (!run) return null;
+  run.filters_json = asObject(run.filters_json);
   const items = await SyncItem.findAll({
     where: { sync_run_id: id },
     order: [['id', 'ASC']],
@@ -897,7 +919,13 @@ export async function getSyncRunWithItems(id) {
 
 /** Currently-processing sync runs (durable source of truth for "active"). */
 export async function listActiveSyncRuns() {
-  return SyncRun.findAll({ where: { status: 'processing' }, order: [['created_at', 'DESC']], raw: true });
+  const rows = await SyncRun.findAll({
+    where: { status: 'processing' },
+    order: [['created_at', 'DESC']],
+    raw: true,
+  });
+  for (const r of rows) r.filters_json = asObject(r.filters_json);
+  return rows;
 }
 
 /** Product ids that failed in a given run (for resync). */
@@ -913,7 +941,7 @@ export async function getFailedProductIds(runId) {
 /** Read the single sync-settings config row ({} when unset). */
 export async function getSyncSettings() {
   const row = await SyncSettings.findOne({ order: [['id', 'ASC']], raw: true });
-  return row?.config_json ?? {};
+  return asObject(row?.config_json);
 }
 
 /** Upsert the single sync-settings config row. */

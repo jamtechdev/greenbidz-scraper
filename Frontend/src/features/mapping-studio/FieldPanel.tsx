@@ -16,6 +16,10 @@ import { Badge } from '@/components/ui/Badge';
 import type { FieldDraft, FieldType, ImagePick, MappingDraft } from './types';
 import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY, CURRENCY_OPTIONS } from './types';
 
+// Built-in spec fields whose values a `table`-type field already captures, so we
+// hint that they don't need to be picked individually (avoids duplicate data).
+const SPEC_BUILTIN_KEYS = new Set(['manufacturer', 'model', 'year', 'condition', 'serial']);
+
 interface PanelProps {
   mode: 'listing' | 'fields';
   draft: MappingDraft;
@@ -26,6 +30,7 @@ interface PanelProps {
   onRemoveField: (key: string) => void;
   onToggleRequired: (key: string) => void;
   onSetType: (key: string, type: FieldType) => void;
+  onSetSelector: (key: string, selector: string) => void;
   onRemoveImage: (index: number) => void;
   onSetCurrency: (currency: string) => void;
   countMatches: (selector: string) => number;
@@ -86,11 +91,18 @@ function FieldsPanel({
   onRemoveField,
   onToggleRequired,
   onSetType,
+  onSetSelector,
   onRemoveImage,
   onSetCurrency,
   countMatches,
 }: PanelProps) {
   const [custom, setCustom] = useState('');
+
+  // A mapped `table`-type field captures every spec row, so the discrete spec
+  // fields below it become redundant — hint that they can be left unmapped.
+  const hasTable = draft.fields.some(
+    (f) => (f.type === 'table' || f.type === 'keyValueTable') && !!f.selector,
+  );
 
   return (
     <div className="space-y-3">
@@ -121,11 +133,13 @@ function FieldsPanel({
           field={f}
           armed={armedKey === f.key}
           matches={f.selector ? countMatches(f.selector) : 0}
+          coveredByTable={hasTable && f.builtin && SPEC_BUILTIN_KEYS.has(f.key) && !f.selector}
           onArm={() => onArm(f.key)}
           onClear={() => onClear(f.key)}
           onRemove={() => onRemoveField(f.key)}
           onToggleRequired={() => onToggleRequired(f.key)}
           onSetType={(t) => onSetType(f.key, t)}
+          onSetSelector={(s) => onSetSelector(f.key, s)}
         />
       ))}
 
@@ -202,20 +216,24 @@ function FieldRow({
   field,
   armed,
   matches,
+  coveredByTable,
   onArm,
   onClear,
   onRemove,
   onToggleRequired,
   onSetType,
+  onSetSelector,
 }: {
   field: FieldDraft;
   armed: boolean;
   matches: number;
+  coveredByTable: boolean;
   onArm: () => void;
   onClear: () => void;
   onRemove: () => void;
   onToggleRequired: () => void;
   onSetType: (t: FieldType) => void;
+  onSetSelector: (s: string) => void;
 }) {
   const mapped = !!field.selector;
   return (
@@ -253,11 +271,24 @@ function FieldRow({
         </div>
       </div>
 
+      {coveredByTable && (
+        <div className="mt-2 text-[11px] text-muted">
+          Covered by your Specifications table — no need to pick this individually.
+        </div>
+      )}
+
       {mapped && (
         <div className="mt-2 space-y-1">
-          <code className="block break-all rounded bg-bg px-2 py-1 font-mono text-[11px] text-sky-300">
-            {field.selector}
-          </code>
+          {/* Editable selector — pick sets it, but you can hand-fix it too
+              (e.g. a brittle picked path → a stable class). Live-validated below. */}
+          <textarea
+            className="block w-full resize-y break-all rounded border border-line bg-bg px-2 py-1 font-mono text-[11px] text-sky-300 outline-none focus:border-sky2"
+            rows={2}
+            spellCheck={false}
+            value={field.selector ?? ''}
+            onChange={(e) => onSetSelector(e.target.value)}
+            title="CSS selector — edit to override the picked one"
+          />
           {field.sampleValue && (
             <div className="truncate text-xs text-muted" title={field.sampleValue}>
               “{field.sampleValue}”
@@ -284,6 +315,7 @@ function FieldRow({
               <option value="text">text</option>
               <option value="html">html</option>
               <option value="number">number</option>
+              <option value="table">table (key/value)</option>
             </select>
           </label>
           <label className="flex cursor-pointer items-center gap-1.5">

@@ -19,7 +19,7 @@ import fssync from 'node:fs';
 import path from 'node:path';
 import chalk from 'chalk';
 import { fileURLToPath } from 'node:url';
-import { raw, testConnection, closePool } from './config/database.js';
+import { raw, createStandaloneConnection, testConnection, closePool } from './config/database.js';
 import { CONSTANTS } from './config/constants.js';
 import { ensureDirSync } from './utils/file-manager.js';
 import { logger } from './utils/logger.js';
@@ -48,6 +48,62 @@ const TEMPLATE_PROFILE = {
   },
   usageCount: 0,
 };
+
+/**
+ * Add any columns introduced after the original schema (CREATE TABLE IF NOT
+ * EXISTS won't alter an existing table). Runs on ONE dedicated connection with a
+ * short lock_wait_timeout so a blocked ALTER (e.g. the dev server holding a
+ * metadata lock on `products`) fails fast with a clear error instead of hanging.
+ * Idempotent — a no-op once every table is already up to date.
+ * @returns {Promise<string>} A short summary of what was changed.
+ */
+async function reconcileColumns() {
+  // Fresh standalone connection — NOT the pool one that just ran the
+  // multi-statement schema.sql (that combination can hang). query() throughout
+  // (no prepared execute()), matching the standalone maintenance scripts.
+  const conn = await createStandaloneConnection();
+  try {
+    await conn.query('SET SESSION lock_wait_timeout = 20');
+
+    const colExists = async (t, c) => {
+      const [rows] = await conn.query(
+        `SELECT 1 FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1`,
+        [t, c],
+      );
+      return rows.length > 0;
+    };
+    const colLen = async (t, c) => {
+      const [rows] = await conn.query(
+        `SELECT CHARACTER_MAXIMUM_LENGTH AS len FROM information_schema.columns
+         WHERE table_schema = DATABASE() AND table_name = ? AND column_name = ? LIMIT 1`,
+        [t, c],
+      );
+      return rows[0] ? rows[0].len : null;
+    };
+
+    const done = [];
+    const add = async (t, c, ddl) => {
+      if (!(await colExists(t, c))) {
+        await conn.query(`ALTER TABLE \`${t}\` ADD COLUMN ${ddl}`);
+        done.push(`+${t}.${c}`);
+      }
+    };
+
+    await add('products', 'synced_at', 'synced_at TIMESTAMP NULL DEFAULT NULL');
+    await add('products', 'main_product_id', 'main_product_id INT NULL DEFAULT NULL');
+    await add('crawl_history', 'scraped_products', 'scraped_products INT NULL');
+    // Older schema created product_url as VARCHAR(191) — widen it for long slugs.
+    const urlLen = await colLen('products', 'product_url');
+    if (urlLen != null && urlLen < 512) {
+      await conn.query('ALTER TABLE `products` MODIFY COLUMN product_url VARCHAR(512) NOT NULL');
+      done.push('~products.product_url→512');
+    }
+    return done.length ? done.join(', ') : 'already up to date';
+  } finally {
+    await conn.end();
+  }
+}
 
 async function step(label, fn) {
   process.stdout.write(chalk.cyan(`• ${label} … `));
@@ -89,6 +145,9 @@ async function main() {
     return 'tables ready';
   });
 
+  // 2b. Reconcile columns added after the original schema (schema drift).
+  await step('Reconciling columns', reconcileColumns);
+
   // 3. Folders.
   await step('Creating folders (profiles/, downloads/, logs/)', async () => {
     ensureDirSync(CONSTANTS.PROFILES_DIR);
@@ -109,12 +168,22 @@ async function main() {
 
   // 5. Verify tables exist.
   await step('Verifying tables', async () => {
+    const expected = [
+      'products',
+      'crawl_history',
+      'pending_mappings',
+      'profiles',
+      'category_mappings',
+      'sync_runs',
+      'sync_items',
+      'sync_settings',
+    ];
     const rows = await raw(
       `SELECT table_name FROM information_schema.tables
        WHERE table_schema = DATABASE()
-         AND table_name IN ('products','crawl_history','pending_mappings')`,
+         AND table_name IN (${expected.map((t) => `'${t}'`).join(',')})`,
     );
-    return `${rows.length}/3 tables present`;
+    return `${rows.length}/${expected.length} tables present`;
   });
 
   await closePool().catch(() => {});

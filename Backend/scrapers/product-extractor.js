@@ -9,6 +9,7 @@ import { goto, newPage, launchBrowser, closeBrowser } from '../config/puppeteer.
 import { CONSTANTS } from '../config/constants.js';
 import { withRetry } from '../utils/retry.js';
 import { logger } from '../utils/logger.js';
+import { simplifyQuantity } from '../services/normalize.js';
 
 /**
  * Parse a price-like string into a number (or null).
@@ -42,8 +43,67 @@ export function parsePrice(raw) {
  */
 /* istanbul ignore next — runs in browser context */
 function extractInPage(fields, selectors) {
+  // Field types that yield a dynamic { label: value } object instead of a scalar.
+  const TABLE_TYPES = { table: 1, keyValueTable: 1 };
+
+  /**
+   * Build a { label: value } object from a key/value spec block. Captures EVERY
+   * row present, so different products with different spec fields each return
+   * whatever they list. Two shapes are supported:
+   *   1. Explicit: `selector` matches the repeating ROWS, and keySelector /
+   *      valueSelector locate the label & value within each row. Works for any
+   *      markup (div grids, dl, custom layouts), not just <table>.
+   *   2. Container: `selector` is the spec block; we auto-split its <tr> rows
+   *      (td/th → key/value), falling back to <dt>/<dd> pairs.
+   */
+  const resolveTable = (def) => {
+    const out = {};
+    const txt = (el) => (el ? el.textContent.trim() : '');
+
+    if (def.keySelector && def.valueSelector) {
+      let rows = [];
+      try {
+        rows = Array.prototype.slice.call(document.querySelectorAll(def.selector));
+      } catch {
+        rows = [];
+      }
+      for (const row of rows) {
+        const k = txt(row.querySelector(def.keySelector));
+        if (k) out[k] = txt(row.querySelector(def.valueSelector));
+      }
+      return out;
+    }
+
+    let container = null;
+    for (const sel of [def.selector, def.fallback].filter(Boolean)) {
+      try {
+        container = document.querySelector(sel);
+      } catch {
+        container = null;
+      }
+      if (container) break;
+    }
+    if (!container) return out;
+
+    container.querySelectorAll('tr').forEach((row) => {
+      const cells = row.querySelectorAll('td, th');
+      if (cells.length >= 2) {
+        const k = txt(cells[0]);
+        if (k) out[k] = txt(cells[1]);
+      }
+    });
+    if (!Object.keys(out).length) {
+      container.querySelectorAll('dt').forEach((dt) => {
+        const k = txt(dt);
+        if (k && dt.nextElementSibling) out[k] = txt(dt.nextElementSibling);
+      });
+    }
+    return out;
+  };
+
   /** Resolve one field definition against the DOM. */
   const resolveField = (def) => {
+    if (TABLE_TYPES[def.type]) return resolveTable(def);
     const trySelectors = [def.selector, def.fallback].filter(Boolean);
     for (const sel of trySelectors) {
       let el;
@@ -166,6 +226,14 @@ export async function scrapeProduct(productUrl, profile, options = {}) {
       profile.fields || {},
       profileSelectors,
     );
+
+    // Simplify a noisy "quantity" before persisting, so the stored raw_data is
+    // clean (e.g. "<span>Available quantity:</span>1" → "1"). Only applied when
+    // a number is actually found; otherwise the original value is kept.
+    if (values.quantity != null) {
+      const q = simplifyQuantity(values.quantity);
+      if (q != null) values.quantity = q;
+    }
 
     const missing = missingRequired(profile.fields, values);
     if (missing.length) {

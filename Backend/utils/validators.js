@@ -104,9 +104,9 @@ function validateDomFields(profile, errors) {
     if (!def.selector || !isValidSelector(def.selector)) {
       errors.push(`Field "${name}" has missing/invalid "selector".`);
     }
-    if (def.type && !['text', 'html', 'attr', 'number'].includes(def.type)) {
+    if (def.type && !['text', 'html', 'attr', 'number', 'table', 'keyValueTable'].includes(def.type)) {
       errors.push(
-        `Field "${name}" has invalid "type" (expected text|html|attr|number).`,
+        `Field "${name}" has invalid "type" (expected text|html|attr|number|table|keyValueTable).`,
       );
     }
     if (def.type === 'attr' && !def.attr) {

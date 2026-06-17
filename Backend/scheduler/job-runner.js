@@ -245,6 +245,15 @@ export async function runCrawlForListing(listingUrl, options = {}) {
   // visually in the Mapping Studio), falling back to the listing-crawler defaults.
   const domProfile = await findDomProfileForListing(listingUrl).catch(() => null);
   const pagination = options.pagination || domProfile?.profile?.pagination;
+  // Make the silent fallback visible: if no profile pagination was found we use
+  // the generic listing-crawler defaults, which rarely match a real site and
+  // typically yield 0 products. Surfacing it turns a mystery into a clear hint.
+  if (!pagination) {
+    logger.warn(
+      `No profile pagination found for ${listingUrl} — using generic crawler ` +
+        `defaults (likely 0 products). Check the profile's domain/listingUrls match this URL.`,
+    );
+  }
   // Per-run cap on how many NEW (unscraped) products to scrape; the rest stay
   // queued (scraped = FALSE) for the next run. Saved on the profile.
   const limit = options.limit ?? domProfile?.profile?.scrapeLimit ?? null;

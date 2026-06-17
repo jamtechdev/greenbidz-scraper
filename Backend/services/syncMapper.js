@@ -13,6 +13,13 @@ import {
   SYNC_DEFAULTS,
 } from '../config/sync-config.js';
 import { htmlToText } from '../utils/html.js';
+import {
+  simplifyQuantity,
+  normalizeCondition,
+  parseWeight,
+  findSpec,
+  cleanText,
+} from './normalize.js';
 
 /** Coerce a value to a clean array (the main API expects arrays for these). */
 function toArr(v) {
@@ -84,6 +91,36 @@ export function mapProduct({
   const rd = product.raw_data && typeof product.raw_data === 'object' ? product.raw_data : {};
   const scrapedCategory = rd.category ? String(rd.category) : null;
   const scrapedSubcategory = rd.subcategory ? String(rd.subcategory) : null;
+
+  // Scraped specs live under raw_data.specifications (a { label: value } object
+  // built by a `table`-type field) with site-varying keys. Parse defensively.
+  let specs = {};
+  if (rd.specifications && typeof rd.specifications === 'object') specs = rd.specifications;
+  else if (typeof rd.specifications === 'string') {
+    try {
+      specs = JSON.parse(rd.specifications) || {};
+    } catch {
+      specs = {};
+    }
+  }
+
+  // Intelligent fallbacks derived from scraped data — applied only when the
+  // admin hasn't overridden the field (override > scraped > default).
+  const scrapedQuantity = simplifyQuantity(rd.quantity);
+  const scrapedCondition = normalizeCondition(
+    findSpec(specs, [/item[\s_]*condition/i, /\bcondition\b/i]) || rd.condition,
+  );
+  const scrapedWeight = parseWeight(findSpec(specs, [/weight/i, /\bmass\b/i]));
+  const scrapedDimensions = findSpec(specs, [/dimension/i, /\bsize\b/i]);
+  const scrapedBrand = findSpec(specs, [/manufacturer/i, /\bbrand\b/i, /\bmake\b/i]);
+  const scrapedModel = findSpec(specs, [/^model$/i, /\bmodel\b/i]);
+  const scrapedSerial = findSpec(specs, [/serial/i]);
+
+  // Condition: admin override wins; else normalized scrape; else default Used.
+  const overrideCondition = toArr(overrides.item_condition);
+  const conditionArr = overrideCondition.length
+    ? overrideCondition
+    : [scrapedCondition || 'usedFunctional'];
   const { category, autoMatched, fromMapping } = resolveCategory({
     marketplace,
     categoryId: overrides.categoryId,
@@ -118,17 +155,17 @@ export function mapProduct({
     seller_name: seller?.displayName ?? '',
     post_author_id: seller ? String(seller.id) : '',
     steps: SYNC_DEFAULTS.steps,
-    quantity: String(overrides.quantity ?? SYNC_DEFAULTS.quantity),
+    quantity: String(overrides.quantity ?? scrapedQuantity ?? SYNC_DEFAULTS.quantity),
     sellerVisible: SYNC_DEFAULTS.sellerVisible,
     replacement_cost_per_unit: overrides.replacement_cost_per_unit ?? '',
-    weight_per_unit: overrides.weight_per_unit ?? '',
+    weight_per_unit: overrides.weight_per_unit ?? (scrapedWeight ?? ''),
     country: country ?? '',
     item_grade: overrides.item_grade ?? '',
     price_now_enabled: SYNC_DEFAULTS.price_now_enabled,
     price_format: overrides.price_format ?? SYNC_DEFAULTS.price_format,
     price_currency: overrides.price_currency ?? defaultCurrency ?? SYNC_DEFAULTS.price_currency,
     price_per_unit: rawPrice === '' ? '' : String(rawPrice),
-    item_condition: toArr(overrides.item_condition),
+    item_condition: conditionArr,
     operation_status: overrides.operation_status
       ? toArr(overrides.operation_status)
       : SYNC_DEFAULTS.operation_status,
@@ -136,11 +173,16 @@ export function mapProduct({
     allowed_sites: [site_type],
   };
 
-  // Optional equipment specs (only included when provided).
+  // Optional equipment specs: admin override wins, else fall back to scraped
+  // specs (only included when a value exists).
   if (overrides.brand) mapped.brand = String(overrides.brand).trim();
+  else if (scrapedBrand) mapped.brand = scrapedBrand;
   if (overrides.model) mapped.model = String(overrides.model).trim();
+  else if (scrapedModel) mapped.model = scrapedModel;
   if (overrides.serial_number) mapped.serial_number = String(overrides.serial_number).trim();
+  else if (scrapedSerial) mapped.serial_number = scrapedSerial;
   if (overrides.dimensions) mapped.dimensions = String(overrides.dimensions).trim();
+  else if (scrapedDimensions) mapped.dimensions = scrapedDimensions;
   if (overrides.market_metrics) {
     mapped.market_metrics =
       typeof overrides.market_metrics === 'string'

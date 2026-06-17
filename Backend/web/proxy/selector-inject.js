@@ -192,6 +192,41 @@ export const SELECTOR_SCRIPT = `
     repaintBadges();
   }
 
+  // ── un-clip flex layouts broken by script-stripping ────────────────────────
+  // Some sites lay out a product's detail column as a flex ROW whose columns
+  // stretch to equal height (align-items:stretch). With the page's own scripts
+  // removed, one column can end up shorter than its content, which then spills
+  // out of the capped flex box (overflow:visible) and is painted OVER by later
+  // DOM (e.g. the page footer) — hiding sections like a "Specifications" table.
+  // Switch only those broken rows to align-items:flex-start so each column sizes
+  // to its own content and nothing is covered. Runs in the iframe where images
+  // have loaded and the layout matches what the user sees. Idempotent + safe.
+  function unclipFlexRows() {
+    try {
+      var changed = false;
+      var els = document.querySelectorAll('*');
+      for (var i = 0; i < els.length; i++) {
+        var el = els[i];
+        if (el.__sxUnclipped) continue;
+        var cs = getComputedStyle(el);
+        if (cs.display !== 'flex' && cs.display !== 'inline-flex') continue;
+        if (cs.flexDirection.indexOf('column') === 0) continue; // row cross-axis only
+        if (cs.alignItems !== 'stretch' && cs.alignItems !== 'normal') continue;
+        var cBottom = el.getBoundingClientRect().bottom;
+        var clipped = false;
+        for (var j = 0; j < el.children.length; j++) {
+          var child = el.children[j];
+          if (getComputedStyle(child).overflowY !== 'visible') continue; // not a scroller
+          // Child content taller than its (stretched) box → it spills below the line.
+          if (child.scrollHeight > child.clientHeight + 4 ||
+              child.getBoundingClientRect().bottom > cBottom + 4) { clipped = true; break; }
+        }
+        if (clipped) { el.style.alignItems = 'flex-start'; el.__sxUnclipped = true; changed = true; }
+      }
+      if (changed) repaintBadges();
+    } catch (e) {}
+  }
+
   // ── interaction ─────────────────────────────────────────────────────────────
   var lastHover = null;
   document.addEventListener('mouseover', function (e) {
@@ -281,6 +316,15 @@ export const SELECTOR_SCRIPT = `
       clearAll();
     }
   });
+
+  // Fix clipped flex layouts now and again as late images/fonts load and reflow
+  // the page (so a "Specifications" block hidden behind the footer reappears).
+  unclipFlexRows();
+  window.addEventListener('load', unclipFlexRows);
+  window.addEventListener('resize', unclipFlexRows);
+  setTimeout(unclipFlexRows, 600);
+  setTimeout(unclipFlexRows, 1500);
+  setTimeout(unclipFlexRows, 3000);
 
   send({ type: 'ready', url: location.href, title: document.title });
 })();
