@@ -117,8 +117,14 @@ export interface SchedulerAutoProfile {
   profileName: string;
   domain: string | null;
   paused: boolean;
+  /** This profile's own scrape cadence, in minutes. */
+  intervalMinutes?: number;
   listingUrlCount: number;
   scrapeLimit: number | null;
+  /** Most recent crawl across this profile's listing URLs (ISO), or null. */
+  lastRunAt?: string | null;
+  /** Next scheduled run (ISO) for this profile when active, else null. */
+  nextRunAt?: string | null;
 }
 
 export interface SchedulerSummary {
@@ -135,8 +141,9 @@ export interface SchedulerStatus {
   running: boolean; // schedule is active (not paused)
   paused: boolean;
   busy: boolean; // a crawl cycle is executing right now
-  intervalHours: number;
-  expression: string;
+  /** Base poll cadence (cron) — the scheduler checks this often; each profile
+   *  runs on its own interval. */
+  pollExpression: string;
   nextRunAt: string | null;
   lastRunAt: string | null;
   lastError: string | null;
@@ -153,6 +160,8 @@ export interface ProfileListItem {
   source: ProfileSource;
   scrapeMode: ScrapeMode | null;
   scrapeLimit?: number | null;
+  /** This profile's own scrape cadence, in minutes (falls back to the global default). */
+  scrapeIntervalMinutes?: number | null;
   downloadImages: boolean;
   /** When true, an 'auto' profile is excluded from the recurring cron. */
   paused: boolean;
@@ -180,6 +189,7 @@ export interface ProfilesResponse {
 export interface ProfileSettings {
   scrapeMode?: ScrapeMode;
   scrapeLimit?: number | null;
+  scrapeIntervalMinutes?: number | null;
   downloadImages?: boolean;
   paused?: boolean;
 }

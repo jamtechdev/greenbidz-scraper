@@ -1,7 +1,6 @@
 /**
  * @file controllers/profiles.controller.js — /api/profiles and friends.
  */
-import { CONSTANTS } from '../config/constants.js';
 import { logger } from '../utils/logger.js';
 import { isValidUrl, validateProfile } from '../utils/validators.js';
 import {
@@ -13,20 +12,10 @@ import {
 } from '../utils/file-manager.js';
 import { getLastCrawlTimes, countProductsPerProfile } from '../database/queries.js';
 import { startCrawlJob } from '../services/crawlJob.js';
-
-/** Next scheduled crawl time for the global cron `0 *\/N * * *`. */
-function computeNextRun() {
-  const interval = Math.max(1, CONSTANTS.CRAWL_INTERVAL_HOURS || 2);
-  const now = new Date();
-  for (let h = 0; h < 24; h += interval) {
-    const candidate = new Date(now.getFullYear(), now.getMonth(), now.getDate(), h, 0, 0, 0);
-    if (candidate.getTime() > now.getTime()) return candidate.toISOString();
-  }
-  return new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0).toISOString();
-}
+import { intervalMinutesOf, nextRunMs } from '../scheduler/schedule-util.js';
 
 /** Settings the Profiles page is allowed to change on an existing profile. */
-const EDITABLE_SETTINGS = ['scrapeMode', 'scrapeLimit', 'downloadImages', 'paused'];
+const EDITABLE_SETTINGS = ['scrapeMode', 'scrapeLimit', 'downloadImages', 'paused', 'scrapeIntervalMinutes'];
 
 /** GET /api/profiles */
 export async function listProfiles(req, res) {
@@ -48,11 +37,11 @@ export async function listProfiles(req, res) {
   } catch (err) {
     logger.warn(`Could not load per-profile product counts: ${err.message}`);
   }
-  const nextRun = computeNextRun();
+  const now = Date.now();
 
   const profiles = all
     .filter((e) => e.profile)
-    .map(({ fileName, profile }) => {
+    .map(({ fileName, profile, createdAt }) => {
       const listingUrls = Array.isArray(profile.listingUrls) ? profile.listingUrls : [];
       const paused = !!profile.paused;
       const scrapeMode = profile.scrapeMode || null;
@@ -65,6 +54,13 @@ export async function listProfiles(req, res) {
 
       const stats = statsByFile[fileName] || { total: 0, scraped: 0, synced: 0, errored: 0 };
 
+      // Per-profile next run = (last scrape, else added time) + this profile's
+      // interval, clamped to now. Only meaningful for active auto profiles.
+      const nextScrapeAt =
+        scrapeMode === 'auto' && !paused
+          ? new Date(nextRunMs(profile, lastByUrl, createdAt, now)).toISOString()
+          : null;
+
       return {
         fileName,
         profileId: profile.profileId,
@@ -73,6 +69,7 @@ export async function listProfiles(req, res) {
         source: profile.source || 'dom',
         scrapeMode,
         scrapeLimit: profile.scrapeLimit ?? null,
+        scrapeIntervalMinutes: intervalMinutesOf(profile),
         downloadImages: !!profile.downloadImages,
         paused,
         urlPattern: profile.urlPattern,
@@ -81,7 +78,7 @@ export async function listProfiles(req, res) {
         hasImages: !!(profile.selectors && profile.selectors.images),
         updatedAt: profile.updatedAt || null,
         lastScrapedAt,
-        nextScrapeAt: scrapeMode === 'auto' && !paused ? nextRun : null,
+        nextScrapeAt,
         // Per-profile product health (see countProductsPerProfile).
         productCount: stats.total,
         scrapedCount: stats.scraped,
@@ -192,6 +189,21 @@ export async function updateSettings(req, res) {
       profile.scrapeLimit = n;
     }
   }
+  if ('scrapeIntervalMinutes' in settings) {
+    const v = settings.scrapeIntervalMinutes;
+    if (v === null || v === '') {
+      // Clearing → fall back to the global default.
+      delete profile.scrapeIntervalMinutes;
+    } else {
+      const n = Number(v);
+      if (!Number.isInteger(n) || n < 20 || n > 1440) {
+        return res
+          .status(400)
+          .json({ error: 'scrapeIntervalMinutes must be an integer between 20 and 1440 (minutes), or null.' });
+      }
+      profile.scrapeIntervalMinutes = n;
+    }
+  }
   if ('downloadImages' in settings) profile.downloadImages = !!settings.downloadImages;
   if ('paused' in settings) profile.paused = !!settings.paused;
 
@@ -208,6 +220,7 @@ export async function updateSettings(req, res) {
     settings: {
       scrapeMode: profile.scrapeMode || null,
       scrapeLimit: profile.scrapeLimit ?? null,
+      scrapeIntervalMinutes: intervalMinutesOf(profile),
       downloadImages: !!profile.downloadImages,
       paused: !!profile.paused,
     },

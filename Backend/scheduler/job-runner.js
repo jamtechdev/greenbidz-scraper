@@ -41,8 +41,10 @@ import {
   listPendingMappings,
   updatePendingMappingFields,
   countProductsByDomain,
+  getLastCrawlTimes,
 } from '../database/queries.js';
 import { readAllProfiles } from '../utils/file-manager.js';
+import { isDue, intervalMinutesOf } from './schedule-util.js';
 import { launchBrowser, closeBrowser } from '../config/puppeteer.js';
 import { CONSTANTS } from '../config/constants.js';
 import { extractDomain } from '../utils/validators.js';
@@ -524,17 +526,42 @@ export async function reprocessPendingMappings({ browser } = {}) {
  * `paused: true`, are skipped — there is NO blanket crawl of .env LISTING_URLS
  * anymore. Also re-detects unmapped patterns.
  *
+ * @param {object} [opts]
+ * @param {boolean} [opts.onlyDue=false] - When true (the recurring 5-min tick),
+ *   only crawl profiles whose own interval has elapsed since their last scrape
+ *   (added time as fallback). When false (a manual "Run now"), crawl every
+ *   active auto profile regardless of interval.
  * @returns {Promise<object[]>} Per-listing crawl summaries.
  */
-export async function runAllAutoProfiles() {
+export async function runAllAutoProfiles({ onlyDue = false } = {}) {
   const all = await readAllProfiles();
-  const autoProfiles = all.filter(
+  let autoProfiles = all.filter(
     (e) => e.profile && e.profile.scrapeMode === 'auto' && !e.profile.paused,
   );
 
   if (!autoProfiles.length) {
     logger.info('No active "with job" (scrapeMode=auto, not paused) profiles — nothing to auto-crawl.');
     return [];
+  }
+
+  // Per-profile interval gating: skip profiles not yet due (recurring tick only).
+  if (onlyDue) {
+    let lastByUrl = new Map();
+    try {
+      for (const row of await getLastCrawlTimes()) lastByUrl.set(row.listing_url, row.last_timestamp);
+    } catch (err) {
+      logger.warn(`Could not load crawl times for due-check: ${err.message}`);
+      lastByUrl = new Map();
+    }
+    const now = Date.now();
+    const total = autoProfiles.length;
+    autoProfiles = autoProfiles.filter((e) => isDue(e.profile, lastByUrl, e.createdAt, now));
+    const skipped = total - autoProfiles.length;
+    if (!autoProfiles.length) {
+      logger.info(`Scheduler tick: no profiles due yet (${skipped} waiting on their interval).`);
+      return [];
+    }
+    if (skipped) logger.info(`Scheduler tick: ${autoProfiles.length} due, ${skipped} not yet due.`);
   }
 
   logger.info(`▶️  Auto-crawling ${autoProfiles.length} "with job" profile(s).`);
@@ -547,6 +574,7 @@ export async function runAllAutoProfiles() {
         logger.warn(`Auto profile ${fileName} has no listingUrls — skipping.`);
         continue;
       }
+      logger.info(`   ↳ ${fileName} (every ${intervalMinutesOf(profile)}m)`);
       for (const url of urls) {
         // eslint-disable-next-line no-await-in-loop
         summaries.push(await runCrawlForListing(url, { browser }));
@@ -584,42 +612,43 @@ export async function runAllListings(listingUrls = CONSTANTS.LISTING_URLS) {
 }
 
 /**
- * Start the recurring scheduler. Every CRAWL_INTERVAL_HOURS it crawls ONLY the
- * profiles marked "with job" (scrapeMode === 'auto'); there is no blanket crawl
- * of .env LISTING_URLS, and (by default) no immediate run on startup — one-time
- * profiles are run once at save-time by the API, not here.
+ * Start the recurring scheduler (standalone CLI path; the Express server uses
+ * scheduler-manager.js instead). A fixed 5-minute base tick crawls ONLY the
+ * "with job" (scrapeMode === 'auto') profiles whose own interval has elapsed
+ * (per-profile `scrapeIntervalMinutes`); there is no blanket crawl of .env
+ * LISTING_URLS, and (by default) no immediate run on startup — one-time profiles
+ * are run once at save-time by the API, not here.
  *
  * @param {object} [options]
- * @param {boolean} [options.runImmediately=false]
+ * @param {boolean} [options.runImmediately=false] - When true, the first tick
+ *   runs ALL auto profiles immediately (ignoring their intervals).
  * @returns {import('node-cron').ScheduledTask}
  */
 export function startScheduler(options = {}) {
   const { runImmediately = false } = options;
-  const hours = CONSTANTS.CRAWL_INTERVAL_HOURS;
-  // Cron: every N hours, on the hour.
-  const expression = `0 */${hours} * * *`;
+  const expression = '*/5 * * * *'; // base poll every 5 min; profiles run on their own intervals
 
   logger.info(
-    `⏰ Scheduler started — auto-crawling "with job" profiles every ${hours} hour(s) ` +
+    `⏰ Scheduler started — checks every 5 min, crawls "with job" profiles on their own intervals ` +
       `[cron: "${expression}"]`,
   );
 
   let running = false;
-  const tick = async () => {
+  const tick = async (onlyDue = true) => {
     if (running) {
       logger.warn('Previous crawl still running — skipping this tick.');
       return;
     }
     running = true;
     try {
-      await runAllAutoProfiles();
+      await runAllAutoProfiles({ onlyDue });
     } finally {
       running = false;
     }
   };
 
-  const task = cron.schedule(expression, tick);
-  if (runImmediately) tick();
+  const task = cron.schedule(expression, () => tick(true));
+  if (runImmediately) tick(false);
   return task;
 }
 

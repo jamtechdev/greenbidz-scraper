@@ -20,6 +20,14 @@ import { useScheduler, useSchedulerActions } from '@/hooks/useApi';
 import { formatNumber, formatDate, timeAgo, timeUntil } from '@/lib/format';
 import type { SchedulerStatus } from '@/types/api';
 
+/** Render a minutes interval as a compact "every 20m / 2h / 1d" label. */
+function formatInterval(minutes?: number): string {
+  if (!minutes || minutes <= 0) return '—';
+  if (minutes % 1440 === 0) return `every ${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `every ${minutes / 60}h`;
+  return `every ${minutes}m`;
+}
+
 export function SchedulerPage() {
   const { data, isLoading, isError, error, refetch } = useScheduler();
   const { runNow, pause, resume } = useSchedulerActions();
@@ -28,7 +36,7 @@ export function SchedulerPage() {
     <>
       <PageHeader
         title="Scheduler"
-        description="Background crawl scheduler — it crawls every profile set to “with job” (auto) on a recurring interval."
+        description="Background crawl scheduler — it checks every 5 minutes and crawls each “with job” (auto) profile on its own interval."
         actions={
           data && (
             <div className="flex items-center gap-2">
@@ -109,8 +117,8 @@ function StatusCard({ s }: { s: SchedulerStatus }) {
                 </Badge>
               </div>
               <div className="text-xs text-muted">
-                Runs every {s.intervalHours} hour{s.intervalHours === 1 ? '' : 's'} ·{' '}
-                <span className="font-mono">{s.expression}</span>
+                Checks every 5 min · each profile on its own interval ·{' '}
+                <span className="font-mono">{s.pollExpression}</span>
               </div>
             </div>
           </div>
@@ -131,8 +139,9 @@ function StatusCard({ s }: { s: SchedulerStatus }) {
           />
           <Fact
             icon={<CalendarClock className="h-4 w-4" />}
-            label="Interval"
-            value={`Every ${s.intervalHours}h`}
+            label="Check cadence"
+            value="Every 5 min"
+            sub="profiles run on their own intervals"
           />
           <Fact
             icon={<FileCode2 className="h-4 w-4" />}
@@ -187,7 +196,7 @@ function AutoProfilesCard({ s }: { s: SchedulerStatus }) {
         <div>
           <div className="font-semibold text-ink">Auto profiles</div>
           <div className="text-xs text-muted">
-            Profiles set to “with job” mode that this scheduler crawls each cycle.
+            Profiles set to “with job” mode — each runs on its own interval (shown per row).
           </div>
         </div>
         <Button size="sm" variant="ghost" onClick={() => navigate('/profiles')}>
@@ -220,10 +229,16 @@ function AutoProfilesCard({ s }: { s: SchedulerStatus }) {
                         <Badge tone="yes">scheduled</Badge>
                       )}
                     </div>
-                    <div className="truncate text-xs text-muted">{p.domain || p.fileName}</div>
+                    <div className="truncate text-xs text-muted">
+                      {p.domain || p.fileName}
+                      {!p.paused && p.listingUrlCount > 0 && p.nextRunAt && (
+                        <> · next {timeUntil(p.nextRunAt)}</>
+                      )}
+                    </div>
                   </div>
                   <div className="flex shrink-0 items-center gap-2 text-xs text-muted">
-                    <Badge tone="info">
+                    <Badge tone="info">{formatInterval(p.intervalMinutes)}</Badge>
+                    <Badge tone="neutral">
                       {p.listingUrlCount} URL{p.listingUrlCount === 1 ? '' : 's'}
                     </Badge>
                     <Badge tone="neutral">{p.scrapeLimit ? `≤${p.scrapeLimit}/run` : 'all/run'}</Badge>

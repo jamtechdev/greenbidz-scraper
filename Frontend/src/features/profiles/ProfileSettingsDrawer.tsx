@@ -27,6 +27,19 @@ import { undoableDelete } from '@/lib/undoToast';
 import type { ProfileListItem, ScrapeMode } from '@/types/api';
 import { formatDate, timeAgo, timeUntil } from '@/lib/format';
 
+/** Per-profile scrape-interval choices (minutes). Each auto profile runs on its own. */
+const SCRAPE_INTERVALS: { label: string; value: number }[] = [
+  { label: '20 min', value: 20 },
+  { label: '30 min', value: 30 },
+  { label: '1 hour', value: 60 },
+  { label: '2 hours', value: 120 },
+  { label: '4 hours', value: 240 },
+  { label: '6 hours', value: 360 },
+  { label: '12 hours', value: 720 },
+  { label: '1 day', value: 1440 },
+];
+const DEFAULT_INTERVAL = 120; // matches backend CRAWL_DEFAULT_INTERVAL_MINUTES (2h)
+
 export function ProfileSettingsDrawer({
   profile,
   onClose,
@@ -43,6 +56,7 @@ export function ProfileSettingsDrawer({
 
   const [mode, setMode] = useState<ScrapeMode>('manual');
   const [limit, setLimit] = useState('');
+  const [interval, setIntervalMin] = useState(DEFAULT_INTERVAL);
   const [images, setImages] = useState(false);
   const [paused, setPaused] = useState(false);
   const [confirmDelete, setConfirmDelete] = useState(false);
@@ -52,6 +66,7 @@ export function ProfileSettingsDrawer({
     if (!profile) return;
     setMode(profile.scrapeMode ?? 'manual');
     setLimit(profile.scrapeLimit != null ? String(profile.scrapeLimit) : '');
+    setIntervalMin(profile.scrapeIntervalMinutes ?? DEFAULT_INTERVAL);
     setImages(!!profile.downloadImages);
     setPaused(!!profile.paused);
     setConfirmDelete(false);
@@ -69,6 +84,7 @@ export function ProfileSettingsDrawer({
     !!profile &&
     (mode !== (profile.scrapeMode ?? 'manual') ||
       limitValue !== (profile.scrapeLimit ?? null) ||
+      interval !== (profile.scrapeIntervalMinutes ?? DEFAULT_INTERVAL) ||
       images !== !!profile.downloadImages ||
       paused !== !!profile.paused);
 
@@ -82,7 +98,13 @@ export function ProfileSettingsDrawer({
     update.mutate(
       {
         fileName: profile.fileName,
-        settings: { scrapeMode: mode, scrapeLimit: limitValue, downloadImages: images, paused },
+        settings: {
+          scrapeMode: mode,
+          scrapeLimit: limitValue,
+          scrapeIntervalMinutes: interval,
+          downloadImages: images,
+          paused,
+        },
       },
       {
         onSuccess: () => toast.success('Profile settings saved.'),
@@ -272,6 +294,29 @@ export function ProfileSettingsDrawer({
                   onChange={setPaused}
                   label={paused ? 'Paused — excluded from the cron' : 'Active — included in the cron'}
                 />
+              </Field>
+            )}
+
+            {mode === 'auto' && (
+              <Field label="Scrape interval">
+                <select
+                  value={interval}
+                  onChange={(e) => setIntervalMin(Number(e.target.value))}
+                  className="h-9 w-44 rounded-lg border border-line bg-panel2 px-3 text-sm text-ink outline-none focus:ring-2 focus:ring-sky2/40"
+                >
+                  {SCRAPE_INTERVALS.some((iv) => iv.value === interval) ? null : (
+                    <option value={interval}>{`${interval} min`}</option>
+                  )}
+                  {SCRAPE_INTERVALS.map((iv) => (
+                    <option key={iv.value} value={iv.value}>
+                      every {iv.label}
+                    </option>
+                  ))}
+                </select>
+                <p className="mt-1 text-xs text-muted">
+                  This profile re-scrapes this long after its own last scrape. Profiles run
+                  independently, so they naturally spread out.
+                </p>
               </Field>
             )}
 

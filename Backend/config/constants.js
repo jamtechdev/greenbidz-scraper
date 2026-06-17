@@ -41,6 +41,9 @@ const boolEnv = (value, fallback = false) => {
 export const CONSTANTS = {
   // ── Crawl scheduling ──────────────────────────────────────────
   CRAWL_INTERVAL_HOURS: intEnv(process.env.CRAWL_INTERVAL_HOURS, 2),
+  // Per-profile interval fallback (minutes) when a profile has not set its own
+  // `scrapeIntervalMinutes`. Derived from CRAWL_INTERVAL_HOURS → single source.
+  CRAWL_DEFAULT_INTERVAL_MINUTES: intEnv(process.env.CRAWL_INTERVAL_HOURS, 2) * 60,
 
   // ── Retry policy ──────────────────────────────────────────────
   MAX_RETRIES: intEnv(process.env.MAX_RETRIES, 3),

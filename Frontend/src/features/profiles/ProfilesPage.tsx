@@ -15,6 +15,14 @@ import { formatNumber } from '@/lib/format';
 import { ProfileSettingsDrawer } from './ProfileSettingsDrawer';
 import { CategoryMappingModal } from '@/features/sync/CategoryMappingModal';
 
+/** Render a minutes interval as a compact "every 20m / 2h / 1d" label. */
+function formatInterval(minutes?: number | null): string {
+  if (!minutes || minutes <= 0) return '';
+  if (minutes % 1440 === 0) return `every ${minutes / 1440}d`;
+  if (minutes % 60 === 0) return `every ${minutes / 60}h`;
+  return `every ${minutes}m`;
+}
+
 /** Normalize a URL to its bare host (drops protocol, www., trailing slash). */
 function hostOf(url: string): string {
   try {
@@ -188,7 +196,12 @@ function ProfileRow({
       </TD>
       <TD className="whitespace-nowrap text-xs text-muted">
         {p.scrapeMode === 'auto' && !p.paused && p.nextScrapeAt ? (
-          <RelTime iso={p.nextScrapeAt} mode="until" />
+          <div>
+            <RelTime iso={p.nextScrapeAt} mode="until" />
+            {p.scrapeIntervalMinutes ? (
+              <div className="text-[11px] text-muted">{formatInterval(p.scrapeIntervalMinutes)}</div>
+            ) : null}
+          </div>
         ) : (
           '—'
         )}

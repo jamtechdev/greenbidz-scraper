@@ -99,12 +99,19 @@ export async function readProfile(fileName) {
 }
 
 /**
- * Read every profile, returning { fileName, profile } pairs.
- * @returns {Promise<Array<{ fileName: string, profile: object }>>}
+ * Read every profile, returning { fileName, profile, createdAt } triples.
+ * `createdAt` is the row's creation timestamp (kept as a sibling, NOT inside
+ * `config`, so it is never persisted back into the JSON). It serves as the
+ * "added time" fallback for scheduling profiles that have never been scraped.
+ * @returns {Promise<Array<{ fileName: string, profile: object, createdAt: string|null }>>}
  */
 export async function readAllProfiles() {
   const rows = await Profile.findAll({ order: [['file_name', 'ASC']], raw: true });
-  return rows.map((r) => ({ fileName: r.file_name, profile: parseConfig(r.config) }));
+  return rows.map((r) => ({
+    fileName: r.file_name,
+    profile: parseConfig(r.config),
+    createdAt: r.created_at ?? null,
+  }));
 }
 
 /**
