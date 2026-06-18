@@ -460,9 +460,19 @@ export async function deleteProducts(ids) {
 /**
  * Distinct scraped (category, subcategory) values from products' raw_data,
  * optionally scoped to a profile or a set of product ids.
+ * @param {object} [opts]
+ * @param {string} [opts.profile]
+ * @param {number[]} [opts.productIds]
+ * @param {boolean} [opts.caseSensitive=false] - When true, every raw casing of a
+ *   category/subcategory is returned as a SEPARATE row (byte-distinct via
+ *   `utf8mb4_bin`). Used by the save fan-out so a single grouped mapping can be
+ *   written for every casing that actually exists in the data, keeping the
+ *   exact-match sync lookup working. The default (false) lets MySQL's
+ *   case-insensitive collation collapse casings — fine for the display list,
+ *   which re-groups in JS anyway.
  * @returns {Promise<Array<{ category: string, subcategory: string }>>}
  */
-export async function getDistinctSourceCategories({ profile, productIds } = {}) {
+export async function getDistinctSourceCategories({ profile, productIds, caseSensitive = false } = {}) {
   // Resolve the profile(s) to show ALL of a profile's scraped categories (not
   // just the selected products). If productIds are given, expand to their
   // distinct profile_file_name(s).
@@ -485,15 +495,21 @@ export async function getDistinctSourceCategories({ profile, productIds } = {}) 
     conds.push('id IN (:ids)');
     repl.ids = ids;
   }
-  const rows = await sequelize.query(
-    `SELECT DISTINCT
-       JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.category')) AS category,
-       COALESCE(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.subcategory')), '') AS subcategory
-     FROM products
-     WHERE ${conds.join(' AND ')}
-     ORDER BY category, subcategory`,
-    { replacements: repl, type: QueryTypes.SELECT },
-  );
+  const catExpr = "JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.category'))";
+  const subExpr = "COALESCE(JSON_UNQUOTE(JSON_EXTRACT(raw_data, '$.subcategory')), '')";
+  // Case-sensitive distinctness via GROUP BY ... COLLATE utf8mb4_bin keeps the
+  // SELECTed values as normal strings (no BINARY → no Buffer in the driver).
+  const sql = caseSensitive
+    ? `SELECT ${catExpr} AS category, ${subExpr} AS subcategory
+       FROM products
+       WHERE ${conds.join(' AND ')}
+       GROUP BY ${catExpr} COLLATE utf8mb4_bin, ${subExpr} COLLATE utf8mb4_bin
+       ORDER BY category, subcategory`
+    : `SELECT DISTINCT ${catExpr} AS category, ${subExpr} AS subcategory
+       FROM products
+       WHERE ${conds.join(' AND ')}
+       ORDER BY category, subcategory`;
+  const rows = await sequelize.query(sql, { replacements: repl, type: QueryTypes.SELECT });
   return rows
     .map((r) => ({
       category: r.category,

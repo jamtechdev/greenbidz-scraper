@@ -98,9 +98,18 @@ export async function getSyncCategories(req, res) {
   res.json({ categories: mp.categories, source: 'config', siteType });
 }
 
+/** Normalised category key for grouping: trimmed + lower-cased. */
+const normCat = (s) => String(s ?? '').trim().toLowerCase();
+const mapKey = (c, s) => `${c}||${s || ''}`;
+
 /**
  * GET /api/sync/source-categories?siteType=&profile=&productIds=
- * Distinct scraped categories (from products) merged with their saved mapping.
+ * Scraped categories (from products) merged with their saved mapping, GROUPED
+ * by category so the modal shows ONE row per category — case/whitespace
+ * differences and varying subcategories (e.g. "Accessories" and
+ * "Accessories › Hoses") collapse into a single "Accessories" row. The save
+ * fan-out (postCategoryMappings) writes the chosen mapping back to every
+ * underlying raw variant, so the exact-match sync lookup is unaffected.
  */
 export async function getSourceCategories(req, res) {
   const mp = getMarketplace(req.query.siteType);
@@ -113,28 +122,88 @@ export async function getSourceCategories(req, res) {
 
   const sources = await getDistinctSourceCategories({ profile, productIds });
   const mappings = await listCategoryMappings(siteType);
-  const key = (c, s) => `${c}||${s || ''}`;
-  const byKey = new Map(mappings.map((m) => [key(m.source_category, m.source_subcategory), m]));
+  const byKey = new Map(mappings.map((m) => [mapKey(m.source_category, m.source_subcategory), m]));
 
-  const items = sources.map((s) => {
-    const m = byKey.get(key(s.category, s.subcategory));
-    return {
-      source_category: s.category,
-      source_subcategory: s.subcategory,
-      main_term_id: m ? m.main_term_id : null,
-      main_term_name: m ? m.main_term_name : null,
-    };
-  });
+  // Group distinct (category, subcategory) variants by normalised category.
+  const groups = new Map(); // normKey → { label, variants: [{category, subcategory}] }
+  for (const s of sources) {
+    const nk = normCat(s.category);
+    if (!nk) continue;
+    let g = groups.get(nk);
+    if (!g) {
+      g = { label: s.category, variants: [] };
+      groups.set(nk, g);
+    }
+    // Prefer a nicer display label (one starting with a capital letter).
+    if (/^[a-z]/.test(g.label) && /^[A-Z]/.test(s.category)) g.label = s.category;
+    g.variants.push({ category: s.category, subcategory: s.subcategory });
+  }
+
+  const items = Array.from(groups.values())
+    .map((g) => {
+      // Current mapping = the main term mapped to ANY of this group's variants
+      // (most recently updated wins, so a fresh save consolidates the group).
+      let chosen = null;
+      for (const v of g.variants) {
+        const m = byKey.get(mapKey(v.category, v.subcategory));
+        if (m && (!chosen || new Date(m.updated_at) > new Date(chosen.updated_at))) chosen = m;
+      }
+      return {
+        source_category: g.label,
+        source_subcategory: '', // grouped → the row represents the whole category
+        variant_count: g.variants.length,
+        main_term_id: chosen ? chosen.main_term_id : null,
+        main_term_name: chosen ? chosen.main_term_name : null,
+      };
+    })
+    .sort((a, b) => a.source_category.localeCompare(b.source_category));
+
   res.json({ siteType, items });
 }
 
-/** POST /api/sync/category-mappings { siteType, mappings: [...] } */
+/**
+ * POST /api/sync/category-mappings { siteType, mappings: [...] }
+ * Each incoming mapping is category-level (subcategory ignored). Fan it out to
+ * EVERY raw (category, subcategory) variant present in products — across all
+ * casings — so the exact-match sync lookup resolves for every product, without
+ * any change to the sync flow.
+ */
 export async function postCategoryMappings(req, res) {
   const { siteType, mappings } = req.body || {};
   const mp = getMarketplace(siteType);
   if (!mp) return res.status(400).json({ error: 'Valid siteType required.' });
-  const written = await saveCategoryMappings(siteTypeFor(mp.name), mappings);
-  logger.success(`Saved ${written} category mapping(s) for ${siteTypeFor(mp.name)}.`);
+  const st = siteTypeFor(mp.name);
+
+  // All raw variants across all products, case-sensitive so every casing is kept.
+  const allVariants = await getDistinctSourceCategories({ caseSensitive: true });
+  const byNorm = new Map(); // normKey → [{category, subcategory}, …]
+  for (const v of allVariants) {
+    const nk = normCat(v.category);
+    if (!byNorm.has(nk)) byNorm.set(nk, []);
+    byNorm.get(nk).push(v);
+  }
+
+  const groups = Array.isArray(mappings) ? mappings : [];
+  const expanded = [];
+  for (const m of groups) {
+    if (!m || !m.source_category || !m.main_term_id) continue;
+    const variants = byNorm.get(normCat(m.source_category)) || [
+      { category: m.source_category, subcategory: m.source_subcategory || '' },
+    ];
+    for (const v of variants) {
+      expanded.push({
+        source_category: v.category,
+        source_subcategory: v.subcategory || '',
+        main_term_id: m.main_term_id,
+        main_term_name: m.main_term_name,
+      });
+    }
+  }
+
+  const written = await saveCategoryMappings(st, expanded);
+  logger.success(
+    `Saved ${written} category mapping(s) (fanned out from ${groups.length} group(s)) for ${st}.`,
+  );
   res.json({ ok: true, written });
 }
 
