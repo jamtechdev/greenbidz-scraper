@@ -260,6 +260,12 @@ export function MappingStudioPage() {
       fields: d.fields.map((f) => (f.key === key ? { ...f, required: !f.required } : f)),
     }));
   }, []);
+  const toggleClean = useCallback((key: string) => {
+    setDraft((d) => ({
+      ...d,
+      fields: d.fields.map((f) => (f.key === key ? { ...f, clean: !f.clean } : f)),
+    }));
+  }, []);
   const setType = useCallback((key: string, type: FieldType) => {
     setDraft((d) => ({ ...d, fields: d.fields.map((f) => (f.key === key ? { ...f, type } : f)) }));
   }, []);
@@ -403,6 +409,7 @@ export function MappingStudioPage() {
                 onAddCustom={addCustom}
                 onRemoveField={removeField}
                 onToggleRequired={toggleRequired}
+                onToggleClean={toggleClean}
                 onSetType={setType}
                 onSetSelector={setSelector}
                 onRemoveImage={removeImage}

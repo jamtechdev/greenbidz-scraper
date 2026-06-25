@@ -98,7 +98,57 @@ function extractInPage(fields, selectors) {
         if (k && dt.nextElementSibling) out[k] = txt(dt.nextElementSibling);
       });
     }
+    // 3) Generic "Label: value" rows with NO <table>/<dl>. Many sites (e.g.
+    //    Aucto) render each spec as  <h3><b>Manufacturer: </b>Clausing</h3>
+    //    — the value is a bare text node, so it can't be picked individually.
+    //    Find each element that holds EXACTLY ONE bold-ish label and take the
+    //    rest of its text as the value. Only runs if the strategies above found
+    //    nothing. Document order means the most granular row wins (a wrapper has
+    //    >1 label and is skipped; the first real row sets the key).
+    if (!Object.keys(out).length) {
+      const labelSel = 'b, strong, dt, th, .font-bold, [class*="label" i]';
+      container.querySelectorAll('h1,h2,h3,h4,h5,h6,li,p,div,tr,dd').forEach((row) => {
+        const labels = row.querySelectorAll(labelSel);
+        if (labels.length !== 1) return; // 0 = no label; >1 = a wrapper, not a row
+        const labelText = txt(labels[0]);
+        const key = labelText.replace(/[\s:：]+$/, '').trim();
+        if (!key || out[key] !== undefined) return;
+        const full = txt(row);
+        const idx = full.indexOf(labelText);
+        const rest = idx === -1 ? full : full.slice(idx + labelText.length);
+        const value = rest.replace(/^[\s:：\-–—]+/, '').trim();
+        if (value) out[key] = value;
+      });
+    }
     return out;
+  };
+
+  /**
+   * Opt-in GENERAL "Clean" — tidy a field's value. Not currency-specific. Four
+   * effects, applied in order (off by default; only runs when def.clean is true):
+   *   1. If exactly one bold-ish label child prefixes the text, drop it
+   *      (<span class="font-bold">Manufacturer: </span>Clausing → Clausing).
+   *   2. "Label: Value" → split on the first colon.
+   *   3. Strip a leading symbol / separator ($2,250.00 → 2,250.00, "- N/A" → N/A).
+   *   4. Collapse internal whitespace (newlines/tabs/nbsp/doubled spaces) → one space.
+   * Steps 2-4 mirror cleanFieldText() on the frontend so the live preview agrees.
+   */
+  const cleanLabelValue = (el, raw) => {
+    const labelSel = 'b, strong, dt, th, .font-bold, [class*="label" i]';
+    let label = '';
+    try {
+      const labels = el.querySelectorAll(labelSel);
+      if (labels.length === 1) label = labels[0].textContent.trim();
+    } catch {
+      label = '';
+    }
+    let value = raw;
+    if (label && value.indexOf(label) === 0) value = value.slice(label.length);
+    const ci = value.indexOf(':');
+    if (ci !== -1 && ci < value.length - 1) value = value.slice(ci + 1);
+    value = value.replace(/^[^\p{L}\p{N}]+/u, ''); // leading $, €, -, spaces, …
+    value = value.replace(/\s+/g, ' '); // collapse \n, \t, nbsp, doubled spaces
+    return value.trim();
   };
 
   /** Resolve one field definition against the DOM. */
@@ -116,7 +166,8 @@ function extractInPage(fields, selectors) {
       if (def.type === 'html') return el.innerHTML.trim();
       if (def.type === 'attr' && def.attr) return el.getAttribute(def.attr);
       // text / number / default
-      return el.textContent.trim();
+      const raw = el.textContent.trim();
+      return def.clean ? cleanLabelValue(el, raw) : raw;
     }
     return null;
   };

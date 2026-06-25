@@ -56,6 +56,8 @@ export interface FieldDraft {
   selector?: string;
   xpath?: string;
   sampleValue?: string;
+  /** When true, strip a "Label:" prefix and keep only the value at scrape time. */
+  clean?: boolean;
 }
 
 export interface ImagePick {
@@ -104,6 +106,26 @@ export const BUILTIN_FIELDS: FieldDraft[] = [
 
 /** Currency options for the profile-level price currency dropdown. */
 export const CURRENCY_OPTIONS = ['USD', 'EUR', 'THB', 'GBP', 'JPY', 'CNY', 'INR'];
+
+/**
+ * String-level "Clean" — a GENERAL tidy-up, used for the instant panel preview
+ * AND mirrored by the backend extractor so both agree. Effects, in order:
+ *   1. "Label: Value"  → "Value"        (drop a label prefix, split on first ':')
+ *   2. strip a leading symbol / separator: "$2,250.00" → "2,250.00", "- N/A" → "N/A"
+ *   3. collapse internal whitespace (newlines, tabs, nbsp, doubled spaces) → one space
+ * Currency is just one case of (2); this is not currency-specific.
+ */
+export function cleanFieldText(raw: string): string {
+  if (!raw) return raw;
+  let v = raw;
+  const ci = v.indexOf(':');
+  if (ci !== -1 && ci < v.length - 1) v = v.slice(ci + 1);
+  // Drop leading non-letter/non-number chars ($, €, -, spaces, …).
+  v = v.replace(/^[^\p{L}\p{N}]+/u, '');
+  // Collapse any run of whitespace (incl. \n, \t, nbsp) to a single space.
+  v = v.replace(/\s+/g, ' ');
+  return v.trim();
+}
 
 export function emptyDraft(): MappingDraft {
   return {
@@ -168,6 +190,20 @@ function escapeRegex(s: string): string {
 }
 
 /**
+ * Does a URL path segment look product-SPECIFIC (i.e. part of the dynamic id),
+ * as opposed to a stable route segment like "bid"/"listings"/"product"?
+ *   - a UUID                         → bb85336f-e82b-46a2-…
+ *   - a numeric id or id-slug        → 5863138, 5863138-used-fedegari
+ *   - a long hyphenated product slug → dake-5-150a-hydraulic-h-frame-press-…
+ */
+function isDynamicSeg(seg: string): boolean {
+  if (/^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(seg)) return true;
+  if (/^\d/.test(seg)) return true;
+  const hyphens = (seg.match(/-/g) || []).length;
+  return hyphens >= 3 || seg.length > 40;
+}
+
+/**
  * From a single product detail URL, derive GENERALIZED selectors/patterns that
  * match ALL products of the same shape — not just the one that was clicked.
  *
@@ -176,7 +212,13 @@ function escapeRegex(s: string): string {
  *     productUrlPattern  /listings/\d+[^/]*
  *     urlPattern         https://www\.labassets\.com/listings/\d+[^/]*
  *
- * The last path segment (the slug/id) is treated as the dynamic part.
+ * The trailing path segments that look product-specific (slug/id/uuid) are
+ * treated as dynamic. Some sites use MORE than one — e.g. Aucto's
+ *   /marketplace/bid/<slug>/<uuid>
+ * has both a slug AND a uuid after the stable "/marketplace/bid/" route. We
+ * strip every trailing dynamic segment so the link selector generalizes to the
+ * stable route (a[href*="/marketplace/bid/"]) and matches ALL products, not the
+ * single one that was clicked.
  */
 export function generalizeProductLink(href: string): {
   linkSelector: string;
@@ -187,11 +229,18 @@ export function generalizeProductLink(href: string): {
     const u = new URL(href);
     const segs = u.pathname.split('/').filter(Boolean);
     if (!segs.length) return null;
-    const last = segs[segs.length - 1];
+    // Always treat the final segment as the id; then keep stripping further
+    // trailing segments that ALSO look product-specific (uuid/slug/numeric id),
+    // keeping at least one stable route segment as the prefix.
     const prefixSegs = segs.slice(0, -1);
+    while (prefixSegs.length > 1 && isDynamicSeg(prefixSegs[prefixSegs.length - 1])) {
+      prefixSegs.pop();
+    }
+    // The first stripped (dynamic) segment drives the pattern's leniency.
+    const firstTail = segs[prefixSegs.length] || '';
     const prefixPath = '/' + (prefixSegs.length ? prefixSegs.join('/') + '/' : '');
-    // Dynamic last segment: numeric-id slugs → \d+[^/]*, otherwise any segment.
-    const lastRegex = /^\d/.test(last) ? '\\d+[^/]*' : '[^/]+';
+    // Dynamic tail: numeric-id slugs → \d+[^/]*, otherwise any segment.
+    const lastRegex = /^\d/.test(firstTail) ? '\\d+[^/]*' : '[^/]+';
     const escPrefix = escapeRegex(prefixPath);
     const escOrigin = escapeRegex(u.origin);
     return {
@@ -242,6 +291,7 @@ export function buildProfile(draft: MappingDraft, now: string): DomProfile {
       selector: f.selector,
       type: f.type,
       required: f.required,
+      ...(f.clean ? { clean: true } : {}),
       ...(f.xpath ? { xpath: f.xpath } : {}),
       ...(f.sampleValue ? { sampleValue: f.sampleValue.slice(0, 200) } : {}),
     };
@@ -292,6 +342,7 @@ export function profileToDraft(config: DomProfile): MappingDraft {
           selector: saved.selector,
           xpath: saved.xpath,
           sampleValue: saved.sampleValue,
+          clean: !!saved.clean,
         }
       : { ...b };
   });
@@ -307,6 +358,7 @@ export function profileToDraft(config: DomProfile): MappingDraft {
       selector: v.selector,
       xpath: v.xpath,
       sampleValue: v.sampleValue,
+      clean: !!v.clean,
     });
   }
 

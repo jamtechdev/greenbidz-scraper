@@ -144,11 +144,46 @@ async function dismissOverlays(page) {
         return (coversMost && (z >= 100 || hasBackdrop)) || (z >= 1000 && hasBackdrop);
       };
 
-      // 3) Remove cookie/consent/gdpr/cmp containers (only if they look like overlays).
-      const named = '[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],[id*="gdpr" i],[class*="gdpr" i],[id*="cmp" i],[class*="cmp-" i],[aria-modal="true"],[role="dialog"]';
+      // 2b) Click generic "close" controls (× / dismiss) so well-behaved modals
+      // tear themselves (and their backdrop) down before we snapshot.
+      [
+        '[aria-label*="close" i]',
+        '[aria-label*="dismiss" i]',
+        'button[title*="close" i]',
+        '.modal-close',
+        '.close-button',
+        '[data-dismiss="modal"]',
+      ].forEach(clickAll);
+
+      // 3) Remove modal dialogs and cookie/consent/gdpr/cmp containers. Unlike a
+      // full-screen overlay, a centered modal (e.g. an "All-In Pricing" notice)
+      // is small and its backdrop is a SEPARATE element, so isOverlay() misses
+      // it — here we also remove anything that's explicitly a dialog/modal/popup
+      // as long as it's positioned (fixed/absolute/sticky), regardless of size.
+      const isPositioned = (el) => {
+        const p = getComputedStyle(el).position;
+        return p === 'fixed' || p === 'sticky' || p === 'absolute';
+      };
+      const named =
+        '[id*="cookie" i],[class*="cookie" i],[id*="consent" i],[class*="consent" i],' +
+        '[id*="gdpr" i],[class*="gdpr" i],[id*="cmp" i],[class*="cmp-" i],' +
+        '[aria-modal="true"],[role="dialog"],[role="alertdialog"],' +
+        '[class*="modal" i],[id*="modal" i],[class*="popup" i],[id*="popup" i],' +
+        '[class*="overlay" i],[class*="backdrop" i],[class*="lightbox" i]';
       document.querySelectorAll(named).forEach((el) => {
         try {
-          if (isOverlay(el) || /cookie|consent|gdpr/i.test(el.id + ' ' + el.className)) el.remove();
+          const id = el.id + ' ' + el.className;
+          const isModalish = /modal|popup|dialog|overlay|backdrop|lightbox/i.test(id) ||
+            el.getAttribute('role') === 'dialog' ||
+            el.getAttribute('role') === 'alertdialog' ||
+            el.getAttribute('aria-modal') === 'true';
+          if (
+            isOverlay(el) ||
+            /cookie|consent|gdpr/i.test(id) ||
+            (isModalish && isPositioned(el))
+          ) {
+            el.remove();
+          }
         } catch {
           /* ignore */
         }

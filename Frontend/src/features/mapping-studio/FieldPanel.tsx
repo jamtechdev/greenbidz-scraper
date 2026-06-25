@@ -14,7 +14,7 @@ import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
 import type { FieldDraft, FieldType, ImagePick, MappingDraft } from './types';
-import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY, CURRENCY_OPTIONS } from './types';
+import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY, CURRENCY_OPTIONS, cleanFieldText } from './types';
 
 // Built-in spec fields whose values a `table`-type field already captures, so we
 // hint that they don't need to be picked individually (avoids duplicate data).
@@ -29,6 +29,7 @@ interface PanelProps {
   onAddCustom: (label: string) => void;
   onRemoveField: (key: string) => void;
   onToggleRequired: (key: string) => void;
+  onToggleClean: (key: string) => void;
   onSetType: (key: string, type: FieldType) => void;
   onSetSelector: (key: string, selector: string) => void;
   onRemoveImage: (index: number) => void;
@@ -90,6 +91,7 @@ function FieldsPanel({
   onAddCustom,
   onRemoveField,
   onToggleRequired,
+  onToggleClean,
   onSetType,
   onSetSelector,
   onRemoveImage,
@@ -138,6 +140,7 @@ function FieldsPanel({
           onClear={() => onClear(f.key)}
           onRemove={() => onRemoveField(f.key)}
           onToggleRequired={() => onToggleRequired(f.key)}
+          onToggleClean={() => onToggleClean(f.key)}
           onSetType={(t) => onSetType(f.key, t)}
           onSetSelector={(s) => onSetSelector(f.key, s)}
         />
@@ -221,6 +224,7 @@ function FieldRow({
   onClear,
   onRemove,
   onToggleRequired,
+  onToggleClean,
   onSetType,
   onSetSelector,
 }: {
@@ -232,6 +236,7 @@ function FieldRow({
   onClear: () => void;
   onRemove: () => void;
   onToggleRequired: () => void;
+  onToggleClean: () => void;
   onSetType: (t: FieldType) => void;
   onSetSelector: (s: string) => void;
 }) {
@@ -294,6 +299,29 @@ function FieldRow({
               “{field.sampleValue}”
             </div>
           )}
+          {/* Clean toggle: when a value tag also holds its label (e.g.
+              "Manufacturer: Clausing"), keep only the value. Off by default. */}
+          {(field.type === 'text' || field.type === 'number') && (
+            <label
+              className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted"
+              title="Strip a 'Label:' prefix and keep only the value — e.g. 'Manufacturer: Clausing' → 'Clausing'."
+            >
+              <input
+                type="checkbox"
+                checked={!!field.clean}
+                onChange={onToggleClean}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              Clean — keep only the value (drop the label)
+            </label>
+          )}
+          {field.clean &&
+            field.sampleValue &&
+            cleanFieldText(field.sampleValue) !== field.sampleValue && (
+              <div className="truncate text-[11px] text-accent" title="Cleaned value">
+                → “{cleanFieldText(field.sampleValue)}”
+              </div>
+            )}
           {matches === 0 && (
             <div className="flex items-center gap-1 text-[11px] text-warn">
               <AlertCircle className="h-3 w-3" /> selector matches 0 elements on this page
@@ -327,6 +355,17 @@ function FieldRow({
             />
             required
           </label>
+        </div>
+      )}
+
+      {/* Guidance for the table type: spec blocks often render the value as a
+          bare text node next to a bold label, so it can't be picked alone —
+          pick the whole block and every "Label: Value" row is captured. */}
+      {field.type === 'table' && (
+        <div className="mt-2 rounded border border-sky2/30 bg-sky-900/20 px-2 py-1.5 text-[11px] text-sky-200">
+          Pick the <b>whole specifications block</b> (not each value). Every row —
+          plain tables, <code>label/value</code> lists, or <code>Label: Value</code> text — is
+          captured automatically into one object.
         </div>
       )}
     </div>

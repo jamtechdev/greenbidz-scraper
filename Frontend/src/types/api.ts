@@ -583,6 +583,8 @@ export interface DomFieldDef {
   attr?: string;
   xpath?: string;
   sampleValue?: string;
+  /** When true, strip a "Label:" prefix at scrape time and keep only the value. */
+  clean?: boolean;
   // For 'keyValueTable': `selector` matches the repeating rows; these locate the
   // label & value within each row.
   keySelector?: string;
