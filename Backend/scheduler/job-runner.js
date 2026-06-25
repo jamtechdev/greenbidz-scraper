@@ -22,6 +22,8 @@ import { crawlListingPage } from '../scrapers/listing-crawler.js';
 import { scrapeProduct, scrapeProductWithRetry } from '../scrapers/product-extractor.js';
 import { crawlListingApi } from '../scrapers/api-client.js';
 import { discoverProductUrls, productUrlPatternFromProfile } from '../scrapers/sitemap-crawler.js';
+import { discoverCategoryUrls } from '../scrapers/category-crawler.js';
+import { mapLimit } from '../utils/concurrency.js';
 import { downloadImages } from '../scrapers/image-downloader.js';
 import { autoDetectFields } from '../detectors/field-auto-detector.js';
 import {
@@ -211,7 +213,10 @@ export async function recordAndSelect(discovered, options = {}) {
  * @returns {Promise<{ allUrls: string[], toScrape: Set<string>, brandNew: string[], pagesVisited: number }>}
  */
 export async function checkForNewProducts(listingUrl, options = {}) {
-  const { urls, pagesVisited } = await crawlListingPage(listingUrl, options);
+  // Snapshot known URLs so the listing crawl can early-stop once it reaches the
+  // already-scraped backlog (big saving on large catalogs). Best-effort.
+  const seenUrls = options.seenUrls || (await getSeenUrls().catch(() => null));
+  const { urls, pagesVisited } = await crawlListingPage(listingUrl, { ...options, seenUrls });
   const discovered = urls.map((u) => ({
     productUrl: u,
     externalId: u.split('/').filter(Boolean).pop(),
@@ -256,6 +261,9 @@ export async function runCrawlForListing(listingUrl, options = {}) {
   if (discoveryMode === 'sitemap' || discoveryMode === 'auto') {
     const sm = await runSitemapCrawlForListing(listingUrl, domProfile, start, options);
     if (sm) return sm; // null only in 'auto' mode with zero matches → fall through
+  }
+  if (discoveryMode === 'category') {
+    return runCategoryCrawlForListing(listingUrl, domProfile, start, options);
   }
 
   const pagination = options.pagination || domProfile?.profile?.pagination;
@@ -310,20 +318,15 @@ export async function runCrawlForListing(listingUrl, options = {}) {
 
     onProgress?.({ phase: 'discovered', found, total: selectedCount });
 
-    for (const url of targets) {
-      if (options.shouldStop?.()) {
-        logger.info('🛑 Scrape cancelled by user.');
-        break;
-      }
-      onProgress?.({ phase: 'scraping', current: url });
-      // eslint-disable-next-line no-await-in-loop
-      const result = await processProductUrl(url, browser, opts(options));
-      // Count only products actually scraped & saved (not merely selected).
-      if (result.status === 'saved') scrapedCount += 1;
-      else if (result.status === 'failed') failed += 1;
-      else if (result.status === 'no-mapping') missingMapping += 1;
-      onProgress?.({ phase: 'item-done', ok: result.status === 'saved' });
-    }
+    // Scrape selected products with bounded concurrency (shared browser).
+    const counts = await scrapeTargetsConcurrently(targets, browser, {
+      forcedProfile: options.forcedProfile,
+      shouldStop: options.shouldStop,
+      onProgress,
+    });
+    scrapedCount = counts.scrapedCount;
+    failed = counts.failed;
+    missingMapping = counts.missingMapping;
 
     const duration = Math.round((Date.now() - start) / 1000);
     await recordCrawl({
@@ -538,19 +541,14 @@ async function runSitemapCrawlForListing(listingUrl, domProfile, start, options 
   let failed = 0;
   let missingMapping = 0;
   try {
-    for (const url of targets) {
-      if (options.shouldStop?.()) {
-        logger.info('🛑 Scrape cancelled by user.');
-        break;
-      }
-      onProgress?.({ phase: 'scraping', current: url });
-      // eslint-disable-next-line no-await-in-loop
-      const result = await processProductUrl(url, browser, { forcedProfile: { fileName, profile } });
-      if (result.status === 'saved') scrapedCount += 1;
-      else if (result.status === 'failed') failed += 1;
-      else if (result.status === 'no-mapping') missingMapping += 1;
-      onProgress?.({ phase: 'item-done', ok: result.status === 'saved' });
-    }
+    const counts = await scrapeTargetsConcurrently(targets, browser, {
+      forcedProfile: { fileName, profile },
+      shouldStop: options.shouldStop,
+      onProgress,
+    });
+    scrapedCount = counts.scrapedCount;
+    failed = counts.failed;
+    missingMapping = counts.missingMapping;
 
     const duration = Math.round((Date.now() - start) / 1000);
     await recordCrawl({
@@ -588,9 +586,143 @@ async function runSitemapCrawlForListing(listingUrl, domProfile, start, options 
   }
 }
 
-/** Pass through forced-profile option into processProductUrl. */
-function opts(options) {
-  return options.forcedProfile ? { forcedProfile: options.forcedProfile } : {};
+/**
+ * Category-source crawl cycle: discover category URLs from the start page, then
+ * paginate each to collect product URLs (no sitemap). Aggregates across all
+ * categories, then records + scrapes the new ones with the owning DOM profile.
+ *
+ * @param {string} listingUrl - The start page (shop/home) to discover from.
+ * @param {{ fileName: string, profile: object }} domProfile
+ * @param {number} start
+ * @param {object} [options]
+ * @returns {Promise<object>}
+ */
+async function runCategoryCrawlForListing(listingUrl, domProfile, start, options = {}) {
+  const { fileName, profile } = domProfile;
+  const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
+  const limit = options.limit ?? profile.scrapeLimit ?? null;
+  const pagination = options.pagination || profile.pagination;
+  const categoryPatterns = profile?.discovery?.categoryPatterns || [];
+  const productPattern = productUrlPatternFromProfile(profile);
+
+  const browser = options.browser || (await launchBrowser());
+  let found = 0;
+  let newCount = 0;
+  let scrapedCount = 0;
+  let failed = 0;
+  let missingMapping = 0;
+
+  try {
+    const categoryUrls = await discoverCategoryUrls(listingUrl, {
+      browser,
+      categoryPatterns,
+      productPattern,
+    });
+    // Crawl the start page too — it may list products directly.
+    const toCrawl = [listingUrl, ...categoryUrls];
+    logger.info(`📂 Category crawl: ${categoryUrls.length} category page(s) + start page for ${fileName}.`);
+
+    // Collect product URLs across all category pages (deduped). Pass the DB
+    // snapshot so each category's pagination early-stops at its known backlog.
+    const seenUrls = await getSeenUrls().catch(() => null);
+    const productUrlSet = new Set();
+    for (const catUrl of toCrawl) {
+      if (options.shouldStop?.()) break;
+      // eslint-disable-next-line no-await-in-loop
+      const { urls } = await crawlListingPage(catUrl, { pagination, browser, seenUrls }).catch(() => ({ urls: [] }));
+      urls.forEach((u) => productUrlSet.add(u));
+    }
+
+    const discovered = [...productUrlSet].map((u) => ({
+      productUrl: u,
+      externalId: u.split('/').filter(Boolean).pop(),
+    }));
+    found = discovered.length;
+
+    // Per-profile total cap.
+    const capDomain = profile.domain || extractDomain(listingUrl);
+    const existingForDomain = await countProductsByDomain(capDomain).catch(() => 0);
+    const maxNew = Math.max(0, CONSTANTS.MAX_PRODUCTS_PER_PROFILE - existingForDomain);
+
+    const { brandNew, toScrape } = await recordAndSelect(discovered, { maxNew, profileFileName: fileName });
+    newCount = brandNew.length;
+
+    let targets = [...toScrape];
+    if (limit && limit > 0) targets = targets.slice(0, limit);
+    onProgress?.({ phase: 'discovered', found, total: targets.length });
+
+    const counts = await scrapeTargetsConcurrently(targets, browser, {
+      forcedProfile: { fileName, profile },
+      shouldStop: options.shouldStop,
+      onProgress,
+    });
+    scrapedCount = counts.scrapedCount;
+    failed = counts.failed;
+    missingMapping = counts.missingMapping;
+
+    const duration = Math.round((Date.now() - start) / 1000);
+    await recordCrawl({
+      listingUrl,
+      productsFound: found,
+      newProducts: newCount,
+      scrapedProducts: scrapedCount,
+      failedProducts: failed,
+      durationSeconds: duration,
+      status: 'completed',
+    });
+    logger.info(
+      `📊 Crawl complete: ${newCount} new, ${scrapedCount} scraped, ${failed} failed (category) (${duration}s)`,
+    );
+    return { listingUrl, found, newCount, scrapedCount, failed, missingMapping, duration };
+  } catch (err) {
+    const duration = Math.round((Date.now() - start) / 1000);
+    await recordCrawl({
+      listingUrl,
+      productsFound: found,
+      newProducts: newCount,
+      failedProducts: failed,
+      durationSeconds: duration,
+      status: 'error',
+      errorMessage: err.message,
+    }).catch(() => {});
+    logger.error(`Category crawl failed for ${listingUrl}: ${err.message}`, { url: listingUrl, stack: err.stack });
+    return { listingUrl, found, newCount, failed, missingMapping, duration, error: err.message };
+  } finally {
+    if (!options.browser) await closeBrowser(browser);
+  }
+}
+
+/**
+ * Scrape a list of product URLs with bounded concurrency (CRAWL_CONCURRENCY),
+ * sharing one browser (each scrape opens its own page). Returns aggregate counts.
+ * Used by the DOM, sitemap and category crawl branches.
+ *
+ * @param {string[]} targets
+ * @param {import('puppeteer').Browser} browser
+ * @param {object} [opts]
+ * @param {{fileName:string, profile:object}} [opts.forcedProfile]
+ * @param {() => boolean} [opts.shouldStop]
+ * @param {(evt:object)=>void} [opts.onProgress]
+ * @returns {Promise<{ scrapedCount:number, failed:number, missingMapping:number }>}
+ */
+async function scrapeTargetsConcurrently(targets, browser, { forcedProfile = null, shouldStop, onProgress } = {}) {
+  let scrapedCount = 0;
+  let failed = 0;
+  let missingMapping = 0;
+  const limit = Math.max(1, CONSTANTS.CRAWL_CONCURRENCY || 1);
+
+  await mapLimit(targets, limit, async (url) => {
+    if (shouldStop?.()) return;
+    onProgress?.({ phase: 'scraping', current: url });
+    const result = await processProductUrl(url, browser, forcedProfile ? { forcedProfile } : {});
+    // Single-threaded JS: these increments never interleave mid-statement.
+    if (result.status === 'saved') scrapedCount += 1;
+    else if (result.status === 'failed') failed += 1;
+    else if (result.status === 'no-mapping') missingMapping += 1;
+    onProgress?.({ phase: 'item-done', ok: result.status === 'saved' });
+  });
+
+  return { scrapedCount, failed, missingMapping };
 }
 
 /**

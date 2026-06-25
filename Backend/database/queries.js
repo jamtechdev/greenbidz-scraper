@@ -774,7 +774,8 @@ export async function listChangedProducts({ limit = 100, profile = null } = {}) 
   }
   const rows = await selectSql(
     `SELECT id, external_id, product_url, profile_file_name, title, price, description,
-            scraped_at, synced_at, main_product_id, main_batch_id, main_site_type
+            scraped_at, synced_at, main_product_id, main_batch_id, main_site_type,
+            main_seller_id, main_seller_name
        FROM products
       WHERE ${where.join(' AND ')}
       ORDER BY scraped_at DESC
@@ -785,6 +786,54 @@ export async function listChangedProducts({ limit = 100, profile = null } = {}) 
     r.main_product_url = mainListingUrl(r.main_site_type, r.main_batch_id);
   }
   return rows;
+}
+
+/**
+ * One-time baseline for already-synced products: set synced_hash = content_hash
+ * where synced_hash is NULL but content_hash is present. This lets products that
+ * were synced before change-detection existed participate in detection — it
+ * treats the CURRENT scraped content as the synced baseline, so only changes
+ * AFTER this point flag. Only meaningful once content_hash is populated (i.e.
+ * after a scrape/refresh). Returns the number of rows updated.
+ * @returns {Promise<number>}
+ */
+export async function backfillSyncedBaseline() {
+  const [, result] = await sequelize.query(
+    `UPDATE products
+        SET synced_hash = content_hash
+      WHERE main_product_id IS NOT NULL
+        AND content_hash IS NOT NULL
+        AND synced_hash IS NULL`,
+  );
+  // mysql2 returns affectedRows on the result metadata.
+  return Number(result?.affectedRows ?? 0);
+}
+
+/**
+ * Select already-synced product ids to re-scrape on a refresh pass — oldest
+ * `scraped_at` first, so the catalog is re-checked in rotation. Used by the
+ * change-detection refresh job.
+ * @param {object} [opts]
+ * @param {number} [opts.limit=50]
+ * @param {string|null} [opts.profile]
+ * @returns {Promise<number[]>}
+ */
+export async function listSyncedProductIdsForRefresh({ limit = 50, profile = null } = {}) {
+  const lim = Math.max(1, Math.min(1000, Number(limit) || 50));
+  const where = ['main_product_id IS NOT NULL'];
+  const repl = [];
+  if (profile) {
+    where.push('profile_file_name = ?');
+    repl.push(profile);
+  }
+  const rows = await selectSql(
+    `SELECT id FROM products
+      WHERE ${where.join(' AND ')}
+      ORDER BY scraped_at ASC
+      LIMIT ${lim}`,
+    repl,
+  );
+  return rows.map((r) => Number(r.id));
 }
 
 /**

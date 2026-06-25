@@ -29,7 +29,11 @@ const gunzip = promisify(zlib.gunzip);
 export const SITEMAP_DEFAULTS = {
   maxSitemaps: 50, // hard cap on sitemap documents fetched per discovery
   maxUrls: 50000, // hard cap on MATCHED product URLs collected
-  fetchTimeoutMs: 45000, // per-request timeout (large item sitemaps stream slowly)
+  // Per-request timeout. Large sites split their sitemap into many multi-MB
+  // files (labx: 21 × item_pages, ~1.5MB each); these stream slowly, so allow
+  // generous time. Tune via SITEMAP_FETCH_TIMEOUT_MS.
+  fetchTimeoutMs: Number.parseInt(process.env.SITEMAP_FETCH_TIMEOUT_MS, 10) || 120000,
+  retries: 1, // retry once on timeout/5xx/network error
   // A browser-like UA. Many sites (e.g. labx.com) 403 obvious bot UAs even for
   // their public sitemaps; a normal browser string is accepted. Sitemaps are
   // public crawl aids, so this stays within robots policy. Override per-call via
@@ -208,27 +212,66 @@ export function productUrlPatternFromProfile(profile) {
  * @returns {Promise<string|null>}
  */
 export async function fetchSitemapText(url, opts = {}) {
-  const { fetchTimeoutMs, userAgent } = { ...SITEMAP_DEFAULTS, ...opts };
-  const ac = new AbortController();
-  const timer = setTimeout(() => ac.abort(), fetchTimeoutMs);
-  try {
-    const res = await fetch(url, {
-      signal: ac.signal,
-      redirect: 'follow',
-      headers: { 'user-agent': userAgent, accept: 'application/xml,text/xml,text/plain,*/*' },
-    });
-    if (!res.ok) {
-      logger.warn(`Sitemap fetch ${res.status} for ${url}`);
-      return null;
+  const { fetchTimeoutMs, userAgent, retries = 1 } = { ...SITEMAP_DEFAULTS, ...opts };
+
+  for (let attempt = 0; attempt <= retries; attempt += 1) {
+    const ac = new AbortController();
+    const timer = setTimeout(() => ac.abort(), fetchTimeoutMs);
+    try {
+      const res = await fetch(url, {
+        signal: ac.signal,
+        redirect: 'follow',
+        headers: { 'user-agent': userAgent, accept: 'application/xml,text/xml,text/plain,*/*' },
+      });
+      if (!res.ok) {
+        // 4xx won't fix on retry; bail. 5xx may, so allow a retry.
+        if (res.status < 500 || attempt === retries) {
+          logger.warn(`Sitemap fetch ${res.status} for ${url}`);
+          return null;
+        }
+        throw new Error(`HTTP ${res.status}`);
+      }
+      // Byte-capped read: for the UI summary we only need a few sample URLs per
+      // section, not the whole (possibly multi-MB, slow/throttled) file. Stream
+      // and stop early. Skipped for .gz files (can't gunzip a truncated stream).
+      const maxBytes = Number(opts.maxBytes) || 0;
+      if (maxBytes > 0 && res.body && !/\.gz(\?|$)/i.test(url)) {
+        const reader = res.body.getReader();
+        const chunks = [];
+        let total = 0;
+        // eslint-disable-next-line no-constant-condition
+        while (true) {
+          // eslint-disable-next-line no-await-in-loop
+          const { done, value } = await reader.read();
+          if (done) break;
+          chunks.push(Buffer.from(value));
+          total += value.length;
+          if (total >= maxBytes) {
+            try {
+              await reader.cancel();
+            } catch {
+              /* ignore */
+            }
+            break;
+          }
+        }
+        return Buffer.concat(chunks).toString('utf8');
+      }
+
+      const buf = Buffer.from(await res.arrayBuffer());
+      return await maybeGunzip(buf, url);
+    } catch (err) {
+      const more = attempt < retries;
+      logger.warn(`Sitemap fetch ${more ? 'retrying' : 'failed'} for ${url}: ${err.message}`);
+      if (!more) return null;
+      // brief backoff before retry
+      // eslint-disable-next-line no-await-in-loop
+      await new Promise((r) => setTimeout(r, 800));
+    } finally {
+      clearTimeout(timer);
     }
-    const buf = Buffer.from(await res.arrayBuffer());
-    return await maybeGunzip(buf, url);
-  } catch (err) {
-    logger.warn(`Sitemap fetch failed for ${url}: ${err.message}`);
-    return null;
-  } finally {
-    clearTimeout(timer);
   }
+  return null;
 }
 
 /**

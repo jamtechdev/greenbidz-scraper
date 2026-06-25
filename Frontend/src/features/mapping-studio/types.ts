@@ -95,7 +95,7 @@ export interface MappingDraft {
    * pagination; 'sitemap' = read the site's XML sitemap(s); 'auto' = try the
    * sitemap, fall back to listing pagination if it finds nothing.
    */
-  discoveryMode: 'listing' | 'sitemap' | 'auto';
+  discoveryMode: 'listing' | 'sitemap' | 'auto' | 'category';
   /** Optional explicit sitemap URL (used when discoveryMode is sitemap/auto). */
   sitemapUrl?: string;
   /** Category URL regexes picked in the Sitemap step (stored for future use). */

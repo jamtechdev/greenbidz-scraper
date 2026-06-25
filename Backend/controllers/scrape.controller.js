@@ -18,6 +18,9 @@ import { runCrawlForListing } from '../scheduler/job-runner.js';
 import { startRescrapeJob } from '../services/rescrapeJob.js';
 import { crawlListingPage } from '../scrapers/listing-crawler.js';
 import { scrapeProduct } from '../scrapers/product-extractor.js';
+import { productUrlPatternFromProfile } from '../scrapers/sitemap-crawler.js';
+import { discoverCategoryUrls } from '../scrapers/category-crawler.js';
+import { matchSitemap } from '../services/sitemapExplorer.js';
 import { launchBrowser, closeBrowser } from '../config/puppeteer.js';
 import { htmlToText } from '../utils/html.js';
 import { countProducts } from '../database/queries.js';
@@ -198,6 +201,58 @@ export async function urlPattern(req, res) {
  * is written to the DB. `required` flags are ignored so partial extractions
  * still come back (the UI shows what was/wasn't found).
  */
+/**
+ * Get up to `n` sample product URLs for a profile, honoring its discovery mode
+ * (sitemap / category / listing). Used by the Test step so it works for sitemap
+ * profiles too (not just DOM-pagination ones).
+ * @returns {Promise<{ urls: string[], found: number }>}
+ */
+async function sampleProductUrls(profile, browser, n) {
+  const mode = profile?.discovery?.mode;
+  const listingUrl = profile.listingUrls[0];
+
+  // Sitemap / auto: pull sample matches from the sitemap (uses the cached summary
+  // from the Sitemap step when available, so it's instant).
+  if (mode === 'sitemap' || mode === 'auto') {
+    const pattern = productUrlPatternFromProfile(profile);
+    if (pattern) {
+      try {
+        const m = await matchSitemap({ siteUrl: listingUrl, sitemapUrl: profile?.discovery?.sitemapUrl, pattern });
+        if (m.samples?.length) return { urls: m.samples.slice(0, n), found: m.matched };
+      } catch (err) {
+        logger.warn(`Test sitemap sampling failed: ${err.message}`);
+      }
+    }
+    if (mode === 'sitemap') return { urls: [], found: 0 };
+  }
+
+  // Category: discover category links, then take products from the first that yields any.
+  if (mode === 'category') {
+    const productPattern = productUrlPatternFromProfile(profile);
+    const cats = await discoverCategoryUrls(listingUrl, {
+      browser,
+      categoryPatterns: profile?.discovery?.categoryPatterns || [],
+      productPattern,
+    }).catch(() => []);
+    for (const cat of [...cats, listingUrl]) {
+      // eslint-disable-next-line no-await-in-loop
+      const { urls } = await crawlListingPage(cat, {
+        pagination: { ...(profile.pagination || {}), maxPages: 1 },
+        browser,
+      }).catch(() => ({ urls: [] }));
+      if (urls.length) return { urls: urls.slice(0, n), found: urls.length };
+    }
+    return { urls: [], found: 0 };
+  }
+
+  // Default: DOM listing crawl (first page only — a test needs a handful of links).
+  const { urls } = await crawlListingPage(listingUrl, {
+    pagination: { ...(profile.pagination || {}), maxPages: 1 },
+    browser,
+  });
+  return { urls: urls.slice(0, n), found: urls.length };
+}
+
 export async function testProfile(req, res) {
   const { profile, limit = 3 } = req.body || {};
   if (!profile || !Array.isArray(profile.listingUrls) || !profile.listingUrls.length) {
@@ -216,13 +271,9 @@ export async function testProfile(req, res) {
   const browser = await launchBrowser();
   try {
     const listingUrl = profile.listingUrls[0];
-    // Only the FIRST listing page — a test needs a handful of links, not the
-    // whole catalogue (no pagination), so it's fast.
-    const { urls } = await crawlListingPage(listingUrl, {
-      pagination: { ...(profile.pagination || {}), maxPages: 1 },
-      browser,
-    });
-    const sample = urls.slice(0, n);
+    // Discovery-aware sampling: sitemap/category profiles get sample URLs from
+    // their own discovery path, not the DOM listing crawler.
+    const { urls: sample, found } = await sampleProductUrls(profile, browser, n);
     const results = [];
     for (const url of sample) {
       try {
@@ -243,7 +294,7 @@ export async function testProfile(req, res) {
         results.push({ url, ok: false, error: err.message });
       }
     }
-    return res.json({ listingUrl, found: urls.length, tested: results.length, results });
+    return res.json({ listingUrl, found, tested: results.length, results });
   } catch (err) {
     logger.warn(`Test-profile failed: ${err.message}`);
     return res.status(502).json({ error: `Could not test this profile: ${err.message}` });

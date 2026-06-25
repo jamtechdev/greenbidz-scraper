@@ -36,27 +36,81 @@ export const DEFAULT_PAGINATION = {
 };
 
 /**
- * Scroll the page top-to-bottom in steps to trigger lazy-loaded product cards
- * and images, then return to the top. Best-effort; swallows errors.
+ * Drive lazy-loaded / infinite-scroll / "Load more" listings to render as many
+ * product cards as possible, then return to the top. Best-effort.
+ *
+ * Strategy (more robust than scrolling on page height alone): repeatedly scroll
+ * to the bottom AND click any "Load more"/"Show more" control, stopping only
+ * when the count of matched product links stops growing for a couple of rounds.
+ * Height can plateau while items keep loading (and vice-versa), so we gate on
+ * the actual product-link count when a selector is provided.
+ *
  * @param {import('puppeteer').Page} page
+ * @param {object} [opts]
+ * @param {string} [opts.linkSelector] - Product-link selector to count progress.
+ * @param {string} [opts.loadMoreSelector] - Explicit "load more" control selector.
+ * @param {number} [opts.maxRounds=60] - Hard cap on scroll/click iterations.
  */
-async function autoScroll(page) {
+async function autoScroll(page, opts = {}) {
+  const { linkSelector = null, loadMoreSelector = null, maxRounds = 60 } = opts;
   try {
-    await page.evaluate(async () => {
-      const step = Math.max(400, window.innerHeight * 0.9);
-      let last = -1;
-      // Scroll until the page stops growing (infinite scroll) or we hit the end.
-      for (let i = 0; i < 40; i++) {
-        window.scrollBy(0, step);
-        await new Promise((r) => setTimeout(r, 250));
-        const h = document.body.scrollHeight;
-        if (window.scrollY + window.innerHeight >= h) {
-          if (h === last) break; // no more content loaded
-          last = h;
+    await page.evaluate(
+      async (linkSel, loadMoreSel, maxR) => {
+        const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+        const step = Math.max(400, window.innerHeight * 0.9);
+        const countItems = () => (linkSel ? document.querySelectorAll(linkSel).length : -1);
+
+        // Find a visible "load more / show more / view more" control.
+        const findLoadMore = () => {
+          if (loadMoreSel) {
+            const el = document.querySelector(loadMoreSel);
+            if (el && el.offsetParent !== null) return el;
+          }
+          const re = /\b(load|show|view)\s*more\b|more\s*(results|products|items)\b/i;
+          const candidates = Array.from(document.querySelectorAll('button, a, [role="button"]'));
+          return (
+            candidates.find(
+              (el) =>
+                el.offsetParent !== null && // visible
+                !el.hasAttribute('disabled') &&
+                re.test((el.textContent || '').trim()),
+            ) || null
+          );
+        };
+
+        let lastCount = -1;
+        let lastHeight = -1;
+        let stagnant = 0;
+        for (let i = 0; i < maxR; i++) {
+          window.scrollTo(0, document.body.scrollHeight);
+          await sleep(300);
+
+          const btn = findLoadMore();
+          if (btn) {
+            btn.click();
+            await sleep(700); // let the next page of items load
+          } else {
+            window.scrollBy(0, step);
+            await sleep(250);
+          }
+
+          const count = countItems();
+          const height = document.body.scrollHeight;
+          const grew = count > lastCount || (count === -1 && height > lastHeight);
+          if (grew) {
+            stagnant = 0;
+            lastCount = count;
+            lastHeight = height;
+          } else if (++stagnant >= 3) {
+            break; // no new items for 3 rounds → done
+          }
         }
-      }
-      window.scrollTo(0, 0);
-    });
+        window.scrollTo(0, 0);
+      },
+      linkSelector,
+      loadMoreSelector,
+      maxRounds,
+    );
     await new Promise((r) => setTimeout(r, 500));
   } catch {
     /* best-effort */
@@ -213,12 +267,23 @@ export async function crawlListingPage(listingUrl, options = {}) {
     // SPA hydration settle.
     await new Promise((r) => setTimeout(r, pagination.settleMs));
 
+    // Early-stop: if a DB snapshot of already-known URLs is provided, stop
+    // paginating after this many CONSECUTIVE pages with no previously-unseen
+    // product (listings are newest-first, so an all-known run means we've hit the
+    // already-scraped backlog). 0 / no seen set disables it.
+    const seenUrls = options.seenUrls instanceof Set ? options.seenUrls : null;
+    const earlyStopAfter = seenUrls ? CONSTANTS.CRAWL_EARLY_STOP_PAGES : 0;
+    let consecutiveKnownPages = 0;
+
     while (pagesVisited < pagination.maxPages) {
       pagesVisited += 1;
       visitedPageUrls.add(page.url());
 
-      // Trigger lazy-loaded cards before harvesting links.
-      await autoScroll(page);
+      // Trigger lazy-loaded / infinite-scroll / "load more" cards before harvesting.
+      await autoScroll(page, {
+        linkSelector: pagination.productLinkSelector,
+        loadMoreSelector: pagination.loadMoreSelector,
+      });
 
       const found = await collectProductUrls(
         page,
@@ -227,10 +292,27 @@ export async function crawlListingPage(listingUrl, options = {}) {
       );
       found.forEach((u) => productUrls.add(u));
 
+      const newOnPage = seenUrls ? found.filter((u) => !seenUrls.has(u)).length : found.length;
       logger.info(
         `📄 Found ${found.length} products on page ${pagesVisited} ` +
-          `(total unique: ${productUrls.size})`,
+          `(${newOnPage} new, total unique: ${productUrls.size})`,
       );
+
+      // Early-stop check (only when a seen set was supplied).
+      if (earlyStopAfter > 0) {
+        if (newOnPage === 0) {
+          consecutiveKnownPages += 1;
+          if (consecutiveKnownPages >= earlyStopAfter) {
+            logger.info(
+              `⏭️  Early-stop: ${consecutiveKnownPages} consecutive page(s) with no new products ` +
+                `— reached the known backlog after ${pagesVisited} page(s).`,
+            );
+            break;
+          }
+        } else {
+          consecutiveKnownPages = 0;
+        }
+      }
 
       // Advance to next page.
       const advanced = await goToNextPage(

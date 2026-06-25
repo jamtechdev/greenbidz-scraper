@@ -565,6 +565,64 @@ export interface SitemapMatchResponse {
   samples: string[];
 }
 
+/** A synced product whose source content diverged from what was last synced. */
+export interface ChangedProduct {
+  id: number;
+  external_id: string;
+  product_url: string;
+  profile_file_name: string | null;
+  title: string | null;
+  price: string | number | null;
+  description: string | null;
+  scraped_at: string | null;
+  synced_at: string | null;
+  main_product_id: number | null;
+  main_batch_id: number | null;
+  main_site_type: string | null;
+  main_seller_id: number | null;
+  main_seller_name: string | null;
+  main_product_url: string | null;
+}
+
+export interface ChangedProductsResponse {
+  count: number;
+  products: ChangedProduct[];
+}
+
+export interface RefreshChangesResponse {
+  started: boolean;
+  jobId: string | null;
+  count: number;
+}
+
+export interface ResyncChangesResponse {
+  started: number;
+  runs: { runId: number; jobId: string; marketplace: string; count: number }[];
+  skipped?: { siteType: string; count: number; reason: string }[];
+}
+
+export interface RefreshSchedulerConfig {
+  intervalHours: number;
+  batchSize: number;
+  autoResync: boolean;
+}
+
+export interface RefreshSchedulerStatus {
+  started: boolean;
+  running: boolean;
+  paused: boolean;
+  busy: boolean;
+  pollExpression: string;
+  lastRunAt: string | null;
+  lastError: string | null;
+  lastSummary: { refreshed: number; failed: number; checked: number; resyncRuns: number } | null;
+  config: RefreshSchedulerConfig;
+}
+
+export interface BaselineResponse {
+  updated: number;
+}
+
 export interface SaveProfileResponse {
   ok: boolean;
   fileName: string;
@@ -632,7 +690,7 @@ export interface DomProfile {
    * sitemap(s). `auto` → try the sitemap, fall back to listing pagination.
    */
   discovery?: {
-    mode?: 'sitemap' | 'auto';
+    mode?: 'sitemap' | 'auto' | 'category';
     /** Optional explicit sitemap URL (skips robots.txt + common-path probing). */
     sitemapUrl?: string;
     /** Regex a product URL must match; defaults to pagination.productUrlPattern. */

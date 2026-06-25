@@ -7,6 +7,7 @@ import {
   MousePointerClick,
   UploadCloud,
   CheckCircle2,
+  GitCompareArrows,
   type LucideIcon,
 } from 'lucide-react';
 
@@ -39,6 +40,7 @@ export const navGroups: NavGroup[] = [
     items: [
       { to: '/products', label: 'Products', icon: Package, badge: 'products' },
       { to: '/sync-products', label: 'Sync Products', icon: CheckCircle2 },
+      { to: '/changes', label: 'Changed Products', icon: GitCompareArrows },
       { to: '/sync-manager', label: 'Sync Manager', icon: UploadCloud },
       { to: '/crawls', label: 'Crawl History', icon: History },
     ],

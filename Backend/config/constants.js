@@ -89,6 +89,16 @@ export const CONSTANTS = {
   // ── Pagination safety limits ──────────────────────────────────
   MAX_PAGES: intEnv(process.env.MAX_PAGES, 500),
 
+  // ── Crawl scaling ─────────────────────────────────────────────
+  // How many product pages to scrape concurrently per listing (shared browser,
+  // one page each). Keep modest to bound memory. Default 3.
+  CRAWL_CONCURRENCY: intEnv(process.env.CRAWL_CONCURRENCY, 3),
+  // Early-stop listing pagination after this many CONSECUTIVE pages that yield
+  // no previously-unseen product URLs (listings are usually newest-first, so a
+  // run of all-known pages means we've reached the already-scraped backlog).
+  // 0 disables early-stop (always paginate to MAX_PAGES). Default 2.
+  CRAWL_EARLY_STOP_PAGES: intEnv(process.env.CRAWL_EARLY_STOP_PAGES, 2),
+
   // ── Per-profile product cap ───────────────────────────────────
   // Max number of products (scraped + unscraped) recorded per site/profile.
   // Discovery stops creating NEW rows for a profile once it hits this; already

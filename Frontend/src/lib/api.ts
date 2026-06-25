@@ -41,6 +41,12 @@ import type {
   UrlPatternResponse,
   SitemapSummaryResponse,
   SitemapMatchResponse,
+  ChangedProductsResponse,
+  RefreshChangesResponse,
+  ResyncChangesResponse,
+  RefreshSchedulerStatus,
+  RefreshSchedulerConfig,
+  BaselineResponse,
 } from '@/types/api';
 
 // Backend API origin. Empty string would fall back to same-origin; we default
@@ -170,6 +176,43 @@ export const api = {
       `/sitemap/match?siteUrl=${encodeURIComponent(siteUrl)}&pattern=${encodeURIComponent(pattern)}` +
         (sitemapUrl ? `&sitemapUrl=${encodeURIComponent(sitemapUrl)}` : ''),
     ),
+
+  // ── Change detection (item #2) ──────────────────────────────────────────────
+
+  /** List synced products whose source content changed since last sync. */
+  getChanges: (limit = 100, profile?: string) =>
+    request<ChangedProductsResponse>(
+      `/changes?limit=${limit}` + (profile ? `&profile=${encodeURIComponent(profile)}` : ''),
+    ),
+
+  /** Kick off a refresh pass: re-scrape synced products to detect changes. */
+  refreshChanges: (limit = 50, profile?: string) =>
+    request<RefreshChangesResponse>('/changes/refresh', {
+      method: 'POST',
+      body: JSON.stringify({ limit, profile }),
+    }),
+
+  /** Re-sync changed products to the main site (PATCH existing listings). */
+  resyncChanges: (ids?: number[]) =>
+    request<ResyncChangesResponse>('/changes/resync', {
+      method: 'POST',
+      body: JSON.stringify(ids && ids.length ? { ids } : {}),
+    }),
+
+  /** One-time baseline: set synced_hash=content_hash for pre-existing synced rows. */
+  baselineChanges: () => request<BaselineResponse>('/changes/baseline', { method: 'POST' }),
+
+  // Change-detection refresh scheduler.
+  getRefreshScheduler: () => request<RefreshSchedulerStatus>('/refresh-scheduler/status'),
+  setRefreshScheduler: (patch: Partial<RefreshSchedulerConfig>) =>
+    request<RefreshSchedulerStatus>('/refresh-scheduler/config', {
+      method: 'POST',
+      body: JSON.stringify(patch),
+    }),
+  pauseRefreshScheduler: () => request<RefreshSchedulerStatus>('/refresh-scheduler/pause', { method: 'POST' }),
+  resumeRefreshScheduler: () => request<RefreshSchedulerStatus>('/refresh-scheduler/resume', { method: 'POST' }),
+  runRefreshSchedulerNow: () =>
+    request<{ started: boolean; reason?: string }>('/refresh-scheduler/run-now', { method: 'POST' }),
 
   saveProfile: (fileName: string | null, profile: DomProfile, runNow = true, createNew = false) =>
     request<SaveProfileResponse>('/save-profile', {

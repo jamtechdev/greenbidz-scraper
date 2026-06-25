@@ -23,7 +23,14 @@ const EXPLORER_DEFAULTS = {
   ...SITEMAP_DEFAULTS,
   maxSections: 80, // cap leaf urlsets summarized
   samplesPerSection: 8, // sample URLs returned per section
-  concurrency: 12, // parallel child-sitemap fetches (wall-time ≈ slowest file)
+  // Parallel child-sitemap fetches. Kept LOW: large sites (labx) have many
+  // multi-MB section files; fetching too many at once starves each download's
+  // bandwidth and they all hit the timeout. 4 lets each finish in time.
+  concurrency: Number.parseInt(process.env.SITEMAP_EXPLORER_CONCURRENCY, 10) || 4,
+  // Optional byte cap per section for the UI summary (escape hatch for very
+  // large / throttled sites). OFF by default so counts stay accurate; set
+  // SITEMAP_EXPLORER_MAX_BYTES (e.g. 400000) to trade exact counts for speed.
+  maxBytesPerSitemap: Number.parseInt(process.env.SITEMAP_EXPLORER_MAX_BYTES, 10) || 0,
   cacheTtlMs: 10 * 60 * 1000, // 10 min
   cacheMaxEntries: 8,
 };
@@ -116,7 +123,8 @@ export async function summarizeSitemap({ siteUrl, sitemapUrl }, opts = {}) {
     if (!batch.length) continue;
     // eslint-disable-next-line no-await-in-loop
     const parsedBatch = await mapLimit(batch, cfg.concurrency, async (u) => {
-      const xml = await fetchSitemapText(u, cfg);
+      // Cap bytes for the summary so slow/throttled multi-MB sections don't stall.
+      const xml = await fetchSitemapText(u, { ...cfg, maxBytes: cfg.maxBytesPerSitemap });
       fetches += 1;
       return xml ? { loc: u, parsed: parseSitemapXml(xml) } : null;
     });

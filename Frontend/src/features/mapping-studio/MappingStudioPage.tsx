@@ -97,9 +97,12 @@ export function MappingStudioPage() {
     setDraft((d) => ({ ...d, ...patch }));
   }, []);
 
-  // In sitemap/auto discovery, step 1 ("Listing") is replaced by the Sitemap
-  // explorer — there's no listing page to map a Next button on.
-  const sitemapMode = draft.discoveryMode === 'sitemap' || draft.discoveryMode === 'auto';
+  // In sitemap/auto/category discovery, step 1 ("Listing") is replaced by the
+  // discovery explorer — there's no single listing page to map a Next button on.
+  const sitemapMode =
+    draft.discoveryMode === 'sitemap' ||
+    draft.discoveryMode === 'auto' ||
+    draft.discoveryMode === 'category';
 
   // Edit mode: load the saved profile once and hydrate the draft, then jump to
   // the Fields step (or Listing if no sample product URL is stored).
@@ -637,6 +640,7 @@ function UrlStep({
               {([
                 { value: 'listing', label: 'Crawl listing' },
                 { value: 'sitemap', label: 'Sitemap' },
+                { value: 'category', label: 'Category' },
                 { value: 'auto', label: 'Auto' },
               ] as const).map((m) => (
                 <button
@@ -668,7 +672,9 @@ function UrlStep({
             <p className="mt-2 text-[11px] text-muted">
               <b>Crawl listing</b> = page through listing URLs (default).{' '}
               <b>Sitemap</b> = read the site’s XML sitemap to find every product at once — ignores
-              categories/pagination; the next “Listing” step is optional.{' '}
+              categories/pagination.{' '}
+              <b>Category</b> = discover category links from the start page, then paginate each
+              (pick category patterns in the next step).{' '}
               <b>Auto</b> = try the sitemap, fall back to crawling listing pages.
             </p>
           </div>
