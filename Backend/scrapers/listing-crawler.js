@@ -17,6 +17,10 @@ import { logger } from '../utils/logger.js';
  * @property {string} productLinkSelector - Selector for anchors linking to products.
  * @property {string} [productUrlPattern] - Optional regex; only hrefs matching are kept.
  * @property {string} [nextSelector] - Selector for the "Next" button/link.
+ * @property {string} [pageParam] - Query param carrying the page number (e.g.
+ *   "page"). When set, pagination increments this param deterministically
+ *   (`?page=1,2,3…`) instead of hunting for a "Next" control. When omitted, the
+ *   crawler still auto-falls-back to `?page=N` if no "Next" control is found.
  * @property {string} [waitForSelector] - Selector to await after each navigation.
  * @property {number} [settleMs] - Extra wait after load for SPA hydration.
  * @property {number} [maxPages] - Hard cap on pages to visit.
@@ -165,16 +169,58 @@ async function goToNextPage(page, nextSelector, waitForSelector, visited = new S
 }
 
 /**
+ * Advance by rewriting a `?page=N` (or custom param) query on the ORIGINAL
+ * listing URL — deterministic pagination that doesn't depend on a "Next" control
+ * existing in the DOM. Ideal for numbered pagination (page 1..N) where sites
+ * emit neither `rel="next"` nor a recognizable `.pagination` block.
+ *
+ * @param {import('puppeteer').Page} page
+ * @param {string} listingUrl - The base listing URL (page 1).
+ * @param {string} param - Query param that carries the page number (e.g. "page").
+ * @param {number} n - Target page number.
+ * @param {string} [waitForSelector]
+ * @returns {Promise<boolean>} true if navigation to the new URL succeeded.
+ */
+async function advanceByQueryParam(page, listingUrl, param, n, waitForSelector) {
+  try {
+    const target = new URL(listingUrl);
+    target.searchParams.set(param, String(n));
+    const href = target.href;
+    const before = page.url();
+    page.goto(href, { waitUntil: 'domcontentloaded', timeout: CONSTANTS.PAGE_TIMEOUT_MS }).catch(() => {});
+    await page.waitForFunction((b) => location.href !== b, { timeout: 20000 }, before).catch(() => {});
+    if (waitForSelector) {
+      await page.waitForSelector(waitForSelector, { timeout: CONSTANTS.PAGE_TIMEOUT_MS }).catch(() => {});
+    }
+    await new Promise((r) => setTimeout(r, 600));
+    return page.url() !== before || page.url().includes(`${param}=${n}`);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Crawl a listing page across all paginated pages and return all product URLs.
  *
  * @param {string} listingUrl
  * @param {object} [options]
  * @param {PaginationConfig} [options.pagination] - Pagination config.
  * @param {import('puppeteer').Browser} [options.browser] - Reuse a browser.
+ * @param {(pageUrls: string[], ctx: { pageNum: number, freshUrls: string[], totalUnique: number, pageUrl: string }) => (void | { stop?: boolean } | Promise<void | { stop?: boolean }>)} [options.onPage]
+ *   Called after each listing page is harvested, BEFORE advancing — lets the
+ *   caller record/scrape products as they stream in (interleaving) and request
+ *   an early stop by returning `{ stop: true }`. Omit for the classic
+ *   "collect everything then return" behaviour.
  * @returns {Promise<{ urls: string[], pagesVisited: number }>}
  */
 export async function crawlListingPage(listingUrl, options = {}) {
   const pagination = { ...DEFAULT_PAGINATION, ...(options.pagination || {}) };
+  const onPage = typeof options.onPage === 'function' ? options.onPage : null;
+  // URL-increment pagination: explicit `pageParam` forces it; otherwise we keep
+  // 'page' ready as an auto-fallback when the DOM "Next" control isn't found.
+  const explicitParam = pagination.pageParam || null;
+  const effectiveParam = explicitParam || 'page';
+  let usingQueryParam = !!explicitParam;
   const browser = options.browser || (await launchBrowser());
   const page = await newPage(browser);
 
@@ -225,6 +271,7 @@ export async function crawlListingPage(listingUrl, options = {}) {
         pagination.productLinkSelector,
         pagination.productUrlPattern,
       );
+      const freshUrls = found.filter((u) => !productUrls.has(u));
       found.forEach((u) => productUrls.add(u));
 
       logger.info(
@@ -232,17 +279,68 @@ export async function crawlListingPage(listingUrl, options = {}) {
           `(total unique: ${productUrls.size})`,
       );
 
+      // Stream this page to the caller (interleaved record/scrape). A returned
+      // `{ stop: true }` halts pagination early (e.g. per-run limit reached).
+      if (onPage) {
+        const res = await onPage(found, {
+          pageNum: pagesVisited,
+          freshUrls,
+          totalUnique: productUrls.size,
+          pageUrl: page.url(),
+        });
+        if (res && res.stop) {
+          logger.info(`⏹️  Discovery stopped early by consumer after page ${pagesVisited}.`);
+          break;
+        }
+      }
+
+      // Query-param mode: a page that surfaces no NEW products means we've gone
+      // past the last page — stop (guards against sites that echo page 1 for
+      // out-of-range ?page=N).
+      if (usingQueryParam && pagesVisited > 1 && freshUrls.length === 0) {
+        logger.info(`No new products on page ${pagesVisited} — reached the last page.`);
+        break;
+      }
+
       // Advance to next page.
-      const advanced = await goToNextPage(
-        page,
-        pagination.nextSelector,
-        pagination.waitForSelector,
-        visitedPageUrls,
-      );
+      let advanced;
+      if (usingQueryParam) {
+        advanced = await advanceByQueryParam(
+          page,
+          listingUrl,
+          effectiveParam,
+          pagesVisited + 1,
+          pagination.waitForSelector,
+        );
+      } else {
+        advanced = await goToNextPage(
+          page,
+          pagination.nextSelector,
+          pagination.waitForSelector,
+          visitedPageUrls,
+        );
+        // Auto-fallback: no DOM "Next" control found on page 1 → try numbered
+        // `?page=N` pagination (many sites, incl. Machinio-style stores, have no
+        // rel="next"). The "no new products" guard above bails if it doesn't work.
+        if (!advanced && pagesVisited === 1) {
+          const tried = await advanceByQueryParam(
+            page,
+            listingUrl,
+            effectiveParam,
+            2,
+            pagination.waitForSelector,
+          );
+          if (tried) {
+            usingQueryParam = true;
+            advanced = true;
+            logger.info(`No "Next" control — falling back to ?${effectiveParam}=N pagination.`);
+          }
+        }
+      }
       if (!advanced) break;
 
       // Loop-protection: if we've already visited this URL, stop.
-      if (visitedPageUrls.has(page.url()) && pagesVisited > 1) {
+      if (!usingQueryParam && visitedPageUrls.has(page.url()) && pagesVisited > 1) {
         // Allow one repeat (SPA same-URL); break if product count didn't grow.
         const sizeBefore = productUrls.size;
         const more = await collectProductUrls(
