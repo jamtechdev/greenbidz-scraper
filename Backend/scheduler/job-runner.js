@@ -275,43 +275,74 @@ export async function runCrawlForListing(listingUrl, options = {}) {
   const onProgress = typeof options.onProgress === 'function' ? options.onProgress : null;
 
   try {
-    const { allUrls, toScrape, brandNew } = await checkForNewProducts(listingUrl, {
-      pagination,
-      browser,
-      maxNew,
-      profileFileName: domProfile?.fileName ?? null,
-    });
-    found = allUrls.length;
-    newCount = brandNew.length;
+    // ── Interleaved, streaming discover → scrape ──────────────────────────────
+    // Rather than enumerating EVERY listing page before scraping (slow + fragile
+    // on 2k–4k-product sites), process each page as it is harvested: record its
+    // new products as stubs, then scrape — on that same page — both the brand-new
+    // ones AND any earlier-recorded-but-unscraped backlog that appears there.
+    // Once this run's `limit` is filled we stop paginating (early-stop), so a
+    // 4k-product site with limit=50 crawls ~1 page instead of ~80, scraping is
+    // visible from page 1, and an interruption keeps everything already saved.
+    const seenBefore = await getSeenUrls();
+    const unscrapedBefore = CONSTANTS.ONLY_NEW_PRODUCTS ? await getUnscrapedUrls() : new Set();
+    const allUrls = new Set();
+    const brandNewSet = new Set();
+    const attempted = new Set(); // scraped/attempted this run (dedupe across pages)
+    let recordedNew = 0;
 
-    // Apply the per-run limit: scrape only the first N unscraped products.
-    let targets = [...toScrape];
-    if (limit && limit > 0) targets = targets.slice(0, limit);
-    const selectedCount = targets.length; // attempted this run (capped by limit)
-
-    if (limit && limit > 0 && toScrape.size > selectedCount) {
-      logger.info(
-        `⏳ Scraping ${selectedCount} of ${toScrape.size} new products this run ` +
-          `(${toScrape.size - selectedCount} queued for next run).`,
-      );
-    }
-
-    onProgress?.({ phase: 'discovered', found, total: selectedCount });
-
-    for (const url of targets) {
-      if (options.shouldStop?.()) {
-        logger.info('🛑 Scrape cancelled by user.');
-        break;
-      }
+    const scrapeOne = async (url) => {
+      attempted.add(url);
       onProgress?.({ phase: 'scraping', current: url });
-      // eslint-disable-next-line no-await-in-loop
       const result = await processProductUrl(url, browser, opts(options));
-      // Count only products actually scraped & saved (not merely selected).
       if (result.status === 'saved') scrapedCount += 1;
       else if (result.status === 'failed') failed += 1;
       else if (result.status === 'no-mapping') missingMapping += 1;
       onProgress?.({ phase: 'item-done', ok: result.status === 'saved' });
-    }
+    };
+
+    await crawlListingPage(listingUrl, {
+      pagination,
+      browser,
+      onPage: async (pageUrls) => {
+        for (const u of pageUrls) allUrls.add(u);
+
+        // Record brand-new products as stubs (scraped = FALSE), capped by maxNew.
+        for (const u of pageUrls) {
+          if (seenBefore.has(u) || brandNewSet.has(u)) continue;
+          if (recordedNew >= maxNew) break;
+          brandNewSet.add(u);
+          recordedNew += 1;
+          // eslint-disable-next-line no-await-in-loop
+          await recordDiscoveredProduct(u, u.split('/').filter(Boolean).pop(), domProfile?.fileName ?? null);
+        }
+        newCount = brandNewSet.size;
+        found = allUrls.size;
+
+        // What to scrape on this page:
+        //  - ONLY_NEW: brand-new (just recorded) + earlier unscraped backlog here.
+        //  - refresh:  every product on the page.
+        const pageTargets = CONSTANTS.ONLY_NEW_PRODUCTS
+          ? pageUrls.filter((u) => !attempted.has(u) && (brandNewSet.has(u) || unscrapedBefore.has(u)))
+          : pageUrls.filter((u) => !attempted.has(u));
+
+        for (const u of pageTargets) {
+          if (options.shouldStop?.()) {
+            logger.info('🛑 Scrape cancelled by user.');
+            return { stop: true };
+          }
+          if (limit && limit > 0 && scrapedCount >= limit) break;
+          // eslint-disable-next-line no-await-in-loop
+          await scrapeOne(u);
+        }
+
+        onProgress?.({ phase: 'discovered', found, total: limit && limit > 0 ? limit : found });
+
+        // Early-stop discovery once this run's scrape budget is filled.
+        if (limit && limit > 0 && scrapedCount >= limit) return { stop: true };
+        return undefined;
+      },
+    });
+    found = allUrls.size;
 
     const duration = Math.round((Date.now() - start) / 1000);
     await recordCrawl({
