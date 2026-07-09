@@ -296,7 +296,15 @@ export function ReviewStep({ draft, onChange, saveFileName, createNew, isEdit }:
             .map((f) => (
               <SummaryRow key={f.key} label={f.label} value={f.selector!} tag={f.required ? 'required' : f.type} />
             ))}
-          {imagesSel && <SummaryRow label="Images" value={imagesSel} tag={`${draft.images.length} picked`} />}
+          {draft.imageSource === 'pattern' && draft.imagePattern.urlTemplate.trim() ? (
+            <SummaryRow
+              label="Images"
+              value={draft.imagePattern.urlTemplate}
+              tag={`URL pattern ×${draft.imagePattern.count}`}
+            />
+          ) : (
+            imagesSel && <SummaryRow label="Images" value={imagesSel} tag={`${draft.images.length} picked`} />
+          )}
           {draft.productLinkSelector && (
             <SummaryRow label="Product link" value={draft.productLinkSelector} tag="listing" />
           )}

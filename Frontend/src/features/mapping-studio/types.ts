@@ -66,6 +66,56 @@ export interface ImagePick {
   classes?: string[];
 }
 
+/**
+ * Build product image URLs from a template instead of reading <img> tags — for
+ * sites whose gallery images are broken/lazy but whose files follow a stable
+ * pattern (e.g. https://host/files/ITEM-55850-002.jpg). The template supports:
+ *   {id} — a per-product token picked from an element on the page (e.g. the SKU)
+ *   {n}  — a sequence number, zero-padded to `pad`, from `start`, up to `count`
+ * At scrape time the sequence stops at the first URL that 404s.
+ */
+export interface ImagePattern {
+  /** e.g. "https://shop.unigreenscheme.co.uk/files/ITEM-{id}-{n}.jpg" */
+  urlTemplate: string;
+  /** CSS selector for the element whose text supplies {id}. */
+  idSelector?: string;
+  /** Sample {id} text captured when picking — used for the live preview. */
+  idSampleValue?: string;
+  /** Strip a "Label:" prefix / symbols from the picked id text (like field clean). */
+  idClean?: boolean;
+  /** Zero-pad width for {n} (e.g. 3 → 001). */
+  pad: number;
+  /** First {n} value (usually 1). */
+  start: number;
+  /** Max images to try; the sequence stops early on the first 404. */
+  count: number;
+}
+
+export function emptyImagePattern(): ImagePattern {
+  return { urlTemplate: '', pad: 3, start: 1, count: 5 };
+}
+
+/**
+ * Expand an image URL template for one product id into concrete URLs. Mirrored
+ * by the backend (scrapers/product-extractor.js) so the preview matches what's
+ * actually fetched. When the template has no {n}, a single URL is produced.
+ */
+export function expandImagePattern(p: ImagePattern, id: string): string[] {
+  const tpl = (p.urlTemplate || '').trim();
+  if (!tpl) return [];
+  const idVal = (id ?? '').trim();
+  const hasN = /\{n\}/.test(tpl);
+  const count = hasN ? Math.max(1, Math.floor(p.count || 1)) : 1;
+  const start = Number.isFinite(p.start) ? p.start : 1;
+  const pad = Math.max(0, Math.floor(p.pad || 0));
+  const out: string[] = [];
+  for (let i = 0; i < count; i += 1) {
+    const n = String(start + i).padStart(pad, '0');
+    out.push(tpl.replace(/\{id\}/g, idVal).replace(/\{n\}/g, n));
+  }
+  return out;
+}
+
 export interface MappingDraft {
   listingUrl: string;
   sampleProductUrl: string;
@@ -77,6 +127,9 @@ export interface MappingDraft {
   // Detail-level (Step "Fields")
   fields: FieldDraft[];
   images: ImagePick[];
+  /** How product images are sourced: picked <img> elements, or a URL template. */
+  imageSource: 'dom' | 'pattern';
+  imagePattern: ImagePattern;
 
   // Meta (Step "Review")
   profileName: string;
@@ -133,6 +186,8 @@ export function emptyDraft(): MappingDraft {
     sampleProductUrl: '',
     fields: BUILTIN_FIELDS.map((f) => ({ ...f })),
     images: [],
+    imageSource: 'dom',
+    imagePattern: emptyImagePattern(),
     profileName: '',
     domain: '',
     urlPattern: '',
@@ -145,6 +200,8 @@ export function emptyDraft(): MappingDraft {
 
 /** A pseudo-field key used to arm picking of the combined "images" target. */
 export const IMAGES_KEY = '__images';
+/** Pseudo-key for picking the element that supplies {id} in an image URL pattern. */
+export const IMAGE_ID_KEY = '__imageId';
 /** Pseudo-keys for listing-level targets. */
 export const PRODUCT_LINK_KEY = '__productLink';
 export const NEXT_KEY = '__next';
@@ -281,6 +338,31 @@ export function generalizeNextSelector(payload: {
   return Array.from(new Set([...hints, payload.selector, ...fallbacks])).join(', ');
 }
 
+/**
+ * Choose which image-source block goes on the saved profile. In 'pattern' mode
+ * (with a non-empty template) we emit `selectors.imagePattern`; otherwise the
+ * combined `selectors.images` CSS selector from the picked <img> elements.
+ */
+function buildImageSelectors(
+  draft: MappingDraft,
+): { images?: string } | { imagePattern: DomProfile['selectors']['imagePattern'] } {
+  const p = draft.imagePattern;
+  if (draft.imageSource === 'pattern' && p.urlTemplate.trim()) {
+    return {
+      imagePattern: {
+        urlTemplate: p.urlTemplate.trim(),
+        ...(p.idSelector ? { idSelector: p.idSelector } : {}),
+        ...(p.idClean ? { idClean: true } : {}),
+        pad: p.pad,
+        start: p.start,
+        count: p.count,
+      },
+    };
+  }
+  const imgSel = combineImageSelector(draft.images);
+  return imgSel ? { images: imgSel } : {};
+}
+
 /** Assemble the final DOM profile to POST to /api/save-profile. */
 export function buildProfile(draft: MappingDraft, now: string): DomProfile {
   const slug = (draft.domain || 'site').replace(/[^a-z0-9]+/gi, '').toLowerCase();
@@ -316,7 +398,7 @@ export function buildProfile(draft: MappingDraft, now: string): DomProfile {
     },
     fields,
     selectors: {
-      ...(combineImageSelector(draft.images) ? { images: combineImageSelector(draft.images) } : {}),
+      ...buildImageSelectors(draft),
       waitForSelector: fields.title?.selector || 'h1',
       timeout: 15000,
     },
@@ -364,6 +446,7 @@ export function profileToDraft(config: DomProfile): MappingDraft {
 
   const pag = config.pagination || {};
   const imagesSel = config.selectors?.images;
+  const savedPattern = config.selectors?.imagePattern;
   return {
     listingUrl: config.listingUrls?.[0] || '',
     sampleProductUrl: config.sampleProductUrl || '',
@@ -371,6 +454,17 @@ export function profileToDraft(config: DomProfile): MappingDraft {
     nextSelector: pag.nextSelector,
     fields,
     images: imagesSel ? [{ selector: imagesSel, src: null }] : [],
+    imageSource: savedPattern ? 'pattern' : 'dom',
+    imagePattern: savedPattern
+      ? {
+          urlTemplate: savedPattern.urlTemplate || '',
+          idSelector: savedPattern.idSelector,
+          idClean: !!savedPattern.idClean,
+          pad: savedPattern.pad ?? 3,
+          start: savedPattern.start ?? 1,
+          count: savedPattern.count ?? 5,
+        }
+      : emptyImagePattern(),
     profileName: config.profileName || '',
     domain: config.domain || '',
     urlPattern: config.urlPattern || '',

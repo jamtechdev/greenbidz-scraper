@@ -615,6 +615,15 @@ export interface DomProfile {
   fields: Record<string, DomFieldDef>;
   selectors: {
     images?: string;
+    /** Alternative to `images`: build image URLs from a per-product template. */
+    imagePattern?: {
+      urlTemplate: string;
+      idSelector?: string;
+      idClean?: boolean;
+      pad: number;
+      start: number;
+      count: number;
+    };
     waitForSelector?: string;
     timeout?: number;
   };

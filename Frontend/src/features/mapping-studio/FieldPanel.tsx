@@ -13,8 +13,16 @@ import {
 import { cn } from '@/lib/cn';
 import { Button } from '@/components/ui/Button';
 import { Badge } from '@/components/ui/Badge';
-import type { FieldDraft, FieldType, ImagePick, MappingDraft } from './types';
-import { IMAGES_KEY, NEXT_KEY, PRODUCT_LINK_KEY, CURRENCY_OPTIONS, cleanFieldText } from './types';
+import type { FieldDraft, FieldType, ImagePattern, ImagePick, MappingDraft } from './types';
+import {
+  IMAGES_KEY,
+  IMAGE_ID_KEY,
+  NEXT_KEY,
+  PRODUCT_LINK_KEY,
+  CURRENCY_OPTIONS,
+  cleanFieldText,
+  expandImagePattern,
+} from './types';
 
 // Built-in spec fields whose values a `table`-type field already captures, so we
 // hint that they don't need to be picked individually (avoids duplicate data).
@@ -34,6 +42,8 @@ interface PanelProps {
   onSetSelector: (key: string, selector: string) => void;
   onRemoveImage: (index: number) => void;
   onSetCurrency: (currency: string) => void;
+  onSetImageSource: (source: 'dom' | 'pattern') => void;
+  onUpdatePattern: (patch: Partial<ImagePattern>) => void;
   countMatches: (selector: string) => number;
 }
 
@@ -96,6 +106,8 @@ function FieldsPanel({
   onSetSelector,
   onRemoveImage,
   onSetCurrency,
+  onSetImageSource,
+  onUpdatePattern,
   countMatches,
 }: PanelProps) {
   const [custom, setCustom] = useState('');
@@ -174,44 +186,244 @@ function FieldsPanel({
         </Button>
       </div>
 
-      {/* Images (multi) */}
+      {/* Images */}
       <div className="rounded-lg border border-line bg-panel2/50 p-3">
-        <div className="mb-2 flex items-center justify-between">
-          <div className="flex items-center gap-2 text-sm font-medium text-ink">
-            <Images className="h-4 w-4 text-sky2" /> Images
-            <Badge tone="neutral">{draft.images.length}</Badge>
-          </div>
-          <div className="flex gap-1.5">
-            <Button
-              size="sm"
-              variant={armedKey === IMAGES_KEY ? 'blue' : 'secondary'}
-              icon={<Crosshair className="h-3.5 w-3.5" />}
-              onClick={() => onArm(IMAGES_KEY)}
+        <div className="mb-2 flex items-center gap-2 text-sm font-medium text-ink">
+          <Images className="h-4 w-4 text-sky2" /> Images
+          {draft.imageSource === 'dom' && <Badge tone="neutral">{draft.images.length}</Badge>}
+        </div>
+
+        {/* Source toggle: pick <img> tags, or build URLs from a pattern. */}
+        <div className="mb-3 flex items-center gap-1 rounded-lg border border-line bg-bg p-1">
+          {([
+            { value: 'dom', label: 'Pick from page' },
+            { value: 'pattern', label: 'Build from URL' },
+          ] as const).map((m) => (
+            <button
+              key={m.value}
+              onClick={() => onSetImageSource(m.value)}
+              className={cn(
+                'flex-1 rounded-md px-2 py-1.5 text-[11px] font-semibold transition-colors',
+                draft.imageSource === m.value ? 'bg-sky2 text-white' : 'text-muted hover:text-ink',
+              )}
             >
-              {armedKey === IMAGES_KEY ? 'Picking…' : 'Pick'}
-            </Button>
-            {draft.images.length > 0 && (
+              {m.label}
+            </button>
+          ))}
+        </div>
+
+        {draft.imageSource === 'dom' ? (
+          <>
+            <div className="mb-2 flex items-center justify-end gap-1.5">
               <Button
                 size="sm"
-                variant="ghost"
-                icon={<Trash2 className="h-3.5 w-3.5" />}
-                onClick={() => onClear(IMAGES_KEY)}
-              />
+                variant={armedKey === IMAGES_KEY ? 'blue' : 'secondary'}
+                icon={<Crosshair className="h-3.5 w-3.5" />}
+                onClick={() => onArm(IMAGES_KEY)}
+              >
+                {armedKey === IMAGES_KEY ? 'Picking…' : 'Pick'}
+              </Button>
+              {draft.images.length > 0 && (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  icon={<Trash2 className="h-3.5 w-3.5" />}
+                  onClick={() => onClear(IMAGES_KEY)}
+                />
+              )}
+            </div>
+            <p className="mb-2 text-[11px] text-muted">
+              Multi-select — click several images on the page; click again to deselect.
+            </p>
+            {draft.images.length > 0 && (
+              <div className="grid grid-cols-4 gap-2">
+                {draft.images.map((img, i) => (
+                  <ImageThumb key={i} img={img} onRemove={() => onRemoveImage(i)} />
+                ))}
+              </div>
             )}
-          </div>
-        </div>
-        <p className="mb-2 text-[11px] text-muted">
-          Multi-select — click several images on the page; click again to deselect.
-        </p>
-        {draft.images.length > 0 && (
-          <div className="grid grid-cols-4 gap-2">
-            {draft.images.map((img, i) => (
-              <ImageThumb key={i} img={img} onRemove={() => onRemoveImage(i)} />
-            ))}
-          </div>
+          </>
+        ) : (
+          <ImagePatternPanel
+            pattern={draft.imagePattern}
+            armed={armedKey === IMAGE_ID_KEY}
+            matches={draft.imagePattern.idSelector ? countMatches(draft.imagePattern.idSelector) : 0}
+            onArmId={() => onArm(IMAGE_ID_KEY)}
+            onClearId={() => onClear(IMAGE_ID_KEY)}
+            onUpdate={onUpdatePattern}
+          />
         )}
       </div>
     </div>
+  );
+}
+
+// ── Image URL pattern (alternative to picking <img> tags) ───────────────────────
+function ImagePatternPanel({
+  pattern,
+  armed,
+  matches,
+  onArmId,
+  onClearId,
+  onUpdate,
+}: {
+  pattern: ImagePattern;
+  armed: boolean;
+  matches: number;
+  onArmId: () => void;
+  onClearId: () => void;
+  onUpdate: (patch: Partial<ImagePattern>) => void;
+}) {
+  const sampleId = pattern.idClean ? cleanFieldText(pattern.idSampleValue ?? '') : pattern.idSampleValue ?? '';
+  const preview = expandImagePattern(pattern, sampleId || '{id}');
+  const hasN = /\{n\}/.test(pattern.urlTemplate);
+
+  return (
+    <div className="space-y-3">
+      <p className="text-[11px] text-muted">
+        For sites whose gallery images are broken but whose files follow a pattern. Use{' '}
+        <code className="text-sky-300">{'{id}'}</code> for the per-product part and{' '}
+        <code className="text-sky-300">{'{n}'}</code> for the image number.
+      </p>
+
+      {/* URL template */}
+      <div>
+        <label className="mb-1 block text-[11px] uppercase tracking-wide text-muted">URL template</label>
+        <textarea
+          className="block w-full resize-y break-all rounded border border-line bg-bg px-2 py-1 font-mono text-[11px] text-sky-300 outline-none focus:border-sky2"
+          rows={2}
+          spellCheck={false}
+          placeholder="https://shop.example.com/files/ITEM-{id}-{n}.jpg"
+          value={pattern.urlTemplate}
+          onChange={(e) => onUpdate({ urlTemplate: e.target.value })}
+        />
+      </div>
+
+      {/* {id} source — picked from the page */}
+      <div className="rounded-lg border border-line bg-bg p-2.5">
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-2 text-sm font-medium text-ink">
+            <Link2 className="h-3.5 w-3.5 text-sky2" /> Product ID <code className="text-sky-300">{'{id}'}</code>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <Button
+              size="sm"
+              variant={armed ? 'blue' : 'secondary'}
+              icon={<Crosshair className="h-3.5 w-3.5" />}
+              onClick={onArmId}
+            >
+              {armed ? 'Picking…' : pattern.idSelector ? 'Re-pick' : 'Pick'}
+            </Button>
+            {pattern.idSelector && (
+              <Button size="sm" variant="ghost" icon={<X className="h-3.5 w-3.5" />} onClick={onClearId} />
+            )}
+          </div>
+        </div>
+        {!pattern.idSelector ? (
+          <p className="mt-1 text-[11px] text-muted">
+            Click the element on the page that shows the product id (e.g. the SKU / item number).
+          </p>
+        ) : (
+          <div className="mt-2 space-y-1">
+            <code className="block break-all rounded bg-panel2 px-2 py-1 font-mono text-[11px] text-sky-300">
+              {pattern.idSelector}
+            </code>
+            {pattern.idSampleValue && (
+              <div className="text-[11px] text-muted">
+                value: <span className="text-ink">“{pattern.idSampleValue}”</span>
+                {sampleId !== pattern.idSampleValue && (
+                  <span className="text-accent"> → “{sampleId}”</span>
+                )}
+              </div>
+            )}
+            <label className="flex cursor-pointer items-center gap-1.5 text-[11px] text-muted">
+              <input
+                type="checkbox"
+                checked={!!pattern.idClean}
+                onChange={(e) => onUpdate({ idClean: e.target.checked })}
+                className="h-3.5 w-3.5 accent-accent"
+              />
+              Clean — keep only the value (drop a “Label:” / symbols)
+            </label>
+            {matches === 0 && (
+              <div className="flex items-center gap-1 text-[11px] text-warn">
+                <AlertCircle className="h-3 w-3" /> selector matches 0 elements on this page
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Sequence controls (only meaningful when the template uses {n}) */}
+      {hasN && (
+        <div className="grid grid-cols-3 gap-2">
+          <NumField
+            label="Start at"
+            value={pattern.start}
+            min={0}
+            onChange={(v) => onUpdate({ start: v })}
+          />
+          <NumField label="Pad" value={pattern.pad} min={0} max={6} onChange={(v) => onUpdate({ pad: v })} />
+          <NumField
+            label="Max images"
+            value={pattern.count}
+            min={1}
+            max={50}
+            onChange={(v) => onUpdate({ count: v })}
+          />
+        </div>
+      )}
+
+      {/* Live preview of the URLs that will be built */}
+      {preview.length > 0 && (
+        <div>
+          <div className="mb-1 text-[11px] uppercase tracking-wide text-muted">
+            Preview {hasN && <span className="normal-case">(stops at the first 404 when scraping)</span>}
+          </div>
+          <div className="space-y-1 rounded-lg border border-line bg-bg p-2">
+            {preview.slice(0, 5).map((u, i) => (
+              <code key={i} className="block break-all font-mono text-[11px] text-sky-300">
+                {u}
+              </code>
+            ))}
+            {preview.length > 5 && (
+              <div className="text-[11px] text-muted">+{preview.length - 5} more…</div>
+            )}
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NumField({
+  label,
+  value,
+  min,
+  max,
+  onChange,
+}: {
+  label: string;
+  value: number;
+  min?: number;
+  max?: number;
+  onChange: (v: number) => void;
+}) {
+  return (
+    <label className="block">
+      <span className="mb-1 block text-[11px] uppercase tracking-wide text-muted">{label}</span>
+      <input
+        type="number"
+        className="input h-8 text-sm"
+        value={value}
+        min={min}
+        max={max}
+        onChange={(e) => {
+          const n = Number(e.target.value);
+          if (Number.isFinite(n)) onChange(n);
+        }}
+      />
+    </label>
   );
 }
 

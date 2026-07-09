@@ -36,6 +36,102 @@ export function parsePrice(raw) {
 }
 
 /**
+ * GENERAL tidy-up of a picked id token — mirrors cleanFieldText() on the
+ * frontend so the Studio preview matches what's fetched. Drops a "Label:"
+ * prefix, a leading symbol, and collapses whitespace.
+ * @param {string} raw
+ * @returns {string}
+ */
+export function cleanText(raw) {
+  if (!raw) return raw == null ? '' : String(raw);
+  let v = String(raw);
+  const ci = v.indexOf(':');
+  if (ci !== -1 && ci < v.length - 1) v = v.slice(ci + 1);
+  v = v.replace(/^[^\p{L}\p{N}]+/u, '');
+  v = v.replace(/\s+/g, ' ');
+  return v.trim();
+}
+
+/**
+ * Expand an image URL template for one product id — mirror of expandImagePattern
+ * on the frontend. `{id}` → the product id, `{n}` → a zero-padded sequence.
+ * @param {object} pattern - { urlTemplate, pad, start, count }
+ * @param {string} id
+ * @returns {string[]}
+ */
+export function expandImagePattern(pattern, id) {
+  const tpl = (pattern.urlTemplate || '').trim();
+  if (!tpl) return [];
+  const idVal = (id == null ? '' : String(id)).trim();
+  const hasN = /\{n\}/.test(tpl);
+  const count = hasN ? Math.max(1, Math.floor(pattern.count || 1)) : 1;
+  const start = Number.isFinite(pattern.start) ? pattern.start : 1;
+  const pad = Math.max(0, Math.floor(pattern.pad || 0));
+  const out = [];
+  for (let i = 0; i < count; i += 1) {
+    const n = String(start + i).padStart(pad, '0');
+    out.push(tpl.replace(/\{id\}/g, idVal).replace(/\{n\}/g, n));
+  }
+  return out;
+}
+
+/**
+ * HEAD/GET a URL to check it points at a real image (200 + image content-type).
+ * @param {string} url
+ * @returns {Promise<boolean>}
+ */
+async function probeImageUrl(url) {
+  const headers = { 'User-Agent': 'Mozilla/5.0', Accept: 'image/*,*/*' };
+  try {
+    let res = await fetch(url, { method: 'HEAD', headers, redirect: 'follow' });
+    // Some servers don't allow HEAD — fall back to GET.
+    if (res.status === 403 || res.status === 405 || res.status === 501) {
+      res = await fetch(url, { method: 'GET', headers, redirect: 'follow' });
+    }
+    if (!res.ok) return false;
+    const ct = (res.headers.get('content-type') || '').toLowerCase();
+    // Accept images; also accept a missing/octet-stream type (servers vary).
+    return !ct || /^image\//.test(ct) || ct.includes('octet-stream');
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Build product image URLs from a template + per-product id, probing each in
+ * sequence and STOPPING at the first 404 (so a product with 3 images doesn't
+ * accumulate broken links). Returns the URLs that exist, in order.
+ *
+ * @param {object} pattern - profile.selectors.imagePattern
+ * @param {string} id - the {id} token scraped from the page
+ * @param {string} baseUrl - product URL, to resolve relative templates
+ * @returns {Promise<string[]>}
+ */
+export async function resolvePatternImages(pattern, id, baseUrl) {
+  const cleanId = pattern.idClean ? cleanText(id) : (id == null ? '' : String(id).trim());
+  if (!cleanId) return [];
+  const hasN = /\{n\}/.test(pattern.urlTemplate || '');
+  const urls = expandImagePattern(pattern, cleanId).map((u) => {
+    try {
+      return new URL(u, baseUrl).href;
+    } catch {
+      return u;
+    }
+  });
+  const found = [];
+  for (const u of urls) {
+    // eslint-disable-next-line no-await-in-loop
+    const ok = await probeImageUrl(u);
+    if (!ok) {
+      if (hasN) break; // sequence: first gap ends the run
+      continue; // no {n}: single URL — nothing more to try
+    }
+    found.push(u);
+  }
+  return found;
+}
+
+/**
  * The in-page extraction routine. Serialised into the browser context.
  * @param {object} fields - Profile fields definition.
  * @param {object} selectors - Profile-level selectors (images, etc.).
@@ -214,7 +310,20 @@ function extractInPage(fields, selectors) {
     }
   });
 
-  return { values, imageUrls, finalUrl: window.location.href, pageTitle: document.title };
+  // Image URL-pattern mode: grab the per-product {id} token from the page; the
+  // URLs themselves are built & probed in Node (needs HTTP, done after evaluate).
+  let patternId = null;
+  const ip = selectors && selectors.imagePattern;
+  if (ip && ip.idSelector) {
+    try {
+      const el = document.querySelector(ip.idSelector);
+      if (el) patternId = el.textContent.trim();
+    } catch {
+      patternId = null;
+    }
+  }
+
+  return { values, imageUrls, patternId, finalUrl: window.location.href, pageTitle: document.title };
 }
 
 /**
@@ -272,11 +381,28 @@ export async function scrapeProduct(productUrl, profile, options = {}) {
       .catch(() => {});
     await new Promise((r) => setTimeout(r, 800));
 
-    const { values, imageUrls, finalUrl, pageTitle } = await page.evaluate(
-      extractInPage,
-      profile.fields || {},
-      profileSelectors,
-    );
+    const { values, imageUrls: domImageUrls, patternId, finalUrl, pageTitle } =
+      await page.evaluate(extractInPage, profile.fields || {}, profileSelectors);
+
+    // Image URL-pattern mode: build & probe URLs from the template (stop on 404).
+    // When configured it takes precedence over any DOM-scraped images.
+    let imageUrls = domImageUrls;
+    const imgPattern = profileSelectors.imagePattern;
+    if (imgPattern && imgPattern.urlTemplate) {
+      const patternUrls = await resolvePatternImages(
+        imgPattern,
+        patternId,
+        finalUrl || productUrl,
+      );
+      if (patternUrls.length) {
+        imageUrls = patternUrls;
+        logger.step('🖼️', `Built ${patternUrls.length} image URL(s) from pattern for ${productUrl}`);
+      } else {
+        logger.warn(
+          `Image pattern produced no reachable URLs for ${productUrl} (id="${patternId ?? ''}").`,
+        );
+      }
+    }
 
     // Simplify a noisy "quantity" before persisting, so the stored raw_data is
     // clean (e.g. "<span>Available quantity:</span>1" → "1"). Only applied when

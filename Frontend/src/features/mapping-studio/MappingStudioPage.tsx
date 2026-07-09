@@ -33,9 +33,11 @@ import {
   generalizeNextSelector,
   generalizeProductLink,
   IMAGES_KEY,
+  IMAGE_ID_KEY,
   NEXT_KEY,
   PRODUCT_LINK_KEY,
   type FieldType,
+  type ImagePattern,
   type MappingDraft,
   type PickedMessage,
 } from './types';
@@ -140,6 +142,16 @@ export function MappingStudioPage() {
           })),
         });
         // stay armed for further multi-picks
+      } else if (field === IMAGE_ID_KEY) {
+        setDraft((d) => ({
+          ...d,
+          imagePattern: {
+            ...d.imagePattern,
+            idSelector: payload.selector,
+            idSampleValue: payload.text,
+          },
+        }));
+        setArmedKey(null);
       } else {
         setDraft((d) => ({
           ...d,
@@ -226,6 +238,11 @@ export function MappingStudioPage() {
       if (key === PRODUCT_LINK_KEY) update({ productLinkSelector: undefined });
       else if (key === NEXT_KEY) update({ nextSelector: undefined });
       else if (key === IMAGES_KEY) update({ images: [] });
+      else if (key === IMAGE_ID_KEY)
+        setDraft((d) => ({
+          ...d,
+          imagePattern: { ...d.imagePattern, idSelector: undefined, idSampleValue: undefined },
+        }));
       else
         setDraft((d) => ({
           ...d,
@@ -281,6 +298,13 @@ export function MappingStudioPage() {
   }, []);
   const removeImage = useCallback((index: number) => {
     setDraft((d) => ({ ...d, images: d.images.filter((_, i) => i !== index) }));
+  }, []);
+  const setImageSource = useCallback(
+    (source: 'dom' | 'pattern') => update({ imageSource: source }),
+    [update],
+  );
+  const updatePattern = useCallback((patch: Partial<ImagePattern>) => {
+    setDraft((d) => ({ ...d, imagePattern: { ...d.imagePattern, ...patch } }));
   }, []);
 
   // ── current page src ───────────────────────────────────────────────────────────
@@ -362,7 +386,9 @@ export function MappingStudioPage() {
   const armedLabel =
     armedKey === IMAGES_KEY
       ? 'Images'
-      : armedKey === PRODUCT_LINK_KEY
+      : armedKey === IMAGE_ID_KEY
+        ? 'Product ID'
+        : armedKey === PRODUCT_LINK_KEY
         ? 'Product link'
         : armedKey === NEXT_KEY
           ? 'Next page'
@@ -414,6 +440,8 @@ export function MappingStudioPage() {
                 onSetSelector={setSelector}
                 onRemoveImage={removeImage}
                 onSetCurrency={(c) => update({ priceCurrency: c })}
+                onSetImageSource={setImageSource}
+                onUpdatePattern={updatePattern}
                 countMatches={countMatches}
               />
             </div>
