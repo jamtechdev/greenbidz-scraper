@@ -116,12 +116,19 @@ export async function getSeenUrls() {
 }
 
 /**
- * Fetch the set of product URLs that have NOT yet been scraped.
+ * Fetch the set of product URLs that have NOT yet been scraped AND have not
+ * exhausted their scrape attempts. Products that keep failing are retired once
+ * scrape_attempts reaches MAX_SCRAPE_ATTEMPTS — their row (with last_error) is
+ * kept as a record, but they are no longer re-attempted, so a single bad URL
+ * can't waste time or block the rest of the crawl.
  * @returns {Promise<Set<string>>}
  */
 export async function getUnscrapedUrls() {
   const rows = await Product.findAll({
-    where: { scraped: false },
+    where: {
+      scraped: false,
+      scrape_attempts: { [Op.lt]: CONSTANTS.MAX_SCRAPE_ATTEMPTS },
+    },
     attributes: ['product_url'],
     raw: true,
   });

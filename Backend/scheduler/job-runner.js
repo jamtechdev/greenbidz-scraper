@@ -129,8 +129,11 @@ export async function processProductUrl(url, browser, opts = {}) {
       stack: err.stack,
     });
     await recordProductError(url, err.message, fileName).catch(() => {});
-    // Leave the discovery-queue row at scraped = FALSE so it is retried on the
-    // next cycle (scrape_attempts on the products row tracks repeated failures).
+    // The row stays scraped = FALSE and its scrape_attempts is incremented as a
+    // permanent record of the failure. Once scrape_attempts reaches
+    // CONSTANTS.MAX_SCRAPE_ATTEMPTS, getUnscrapedUrls() stops returning it, so a
+    // persistently-failing URL is retired (kept on record, never re-attempted)
+    // and can't slow down or block the rest of the crawl.
     return { status: 'failed' };
   }
 }

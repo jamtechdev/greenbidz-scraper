@@ -413,6 +413,13 @@ export async function scrapeProduct(productUrl, profile, options = {}) {
     }
 
     const missing = missingRequired(profile.fields, values);
+    // Optionally treat images as a required field too (profile opt-in via
+    // selectors.imagesRequired). Unlike `fields`, images aren't in `values`, so
+    // they're validated here. A product with no images is skipped (recorded as a
+    // failed attempt), so only products that have BOTH a title and images pass.
+    if (profileSelectors.imagesRequired && (!imageUrls || imageUrls.length === 0)) {
+      missing.push('images');
+    }
     if (missing.length) {
       throw new Error(
         `Missing required field(s): ${missing.join(', ')} on ${productUrl}`,

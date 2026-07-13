@@ -48,6 +48,12 @@ export const CONSTANTS = {
   // ── Retry policy ──────────────────────────────────────────────
   MAX_RETRIES: intEnv(process.env.MAX_RETRIES, 3),
   RETRY_DELAY_MS: intEnv(process.env.RETRY_DELAY_MS, 2000),
+  // Give-up threshold for a failing product ACROSS crawls. Once a product's
+  // scrape_attempts reaches this, it is retired: recorded (with last_error) but
+  // never re-attempted on future crawls, so one bad URL can't slow down or block
+  // the rest. Default 1 = no cross-crawl retry (attempt once, then record & skip).
+  // A single crawl still tolerates transient blips via MAX_RETRIES internally.
+  MAX_SCRAPE_ATTEMPTS: intEnv(process.env.MAX_SCRAPE_ATTEMPTS, 1),
 
   // ── Image downloading ─────────────────────────────────────────
   DOWNLOAD_IMAGES: boolEnv(process.env.DOWNLOAD_IMAGES, true),
