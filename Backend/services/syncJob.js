@@ -18,7 +18,9 @@ import { siteTypeFor, getMarketplace } from '../config/sync-config.js';
 import { addSyncItems, updateSyncRun, markProductsSynced } from '../database/queries.js';
 import { logger } from '../utils/logger.js';
 
-const CHUNK_SIZE = 25;
+// Must not exceed the main API's MAX_GROUPED_PRODUCTS (10) per
+// create-grouped-listings call, or the whole chunk is rejected with HTTP 400.
+const CHUNK_SIZE = 10;
 
 function chunk(arr, n) {
   const out = [];

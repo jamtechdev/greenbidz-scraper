@@ -68,13 +68,16 @@ export async function postGroupedListings({ siteType, results, country, seller }
   }
 
   if (!upstream.ok) {
-    logger.warn(`Main API returned ${upstream.status}`);
+    const upstreamMsg = data?.message || data?.error || (typeof data?.raw === 'string' ? data.raw : '');
+    logger.warn(`Main API returned ${upstream.status}${upstreamMsg ? `: ${upstreamMsg}` : ''}`);
     return {
       ok: false,
       status: upstream.status,
       data,
       mainIdByProductId: {},
-      error: 'Main API rejected the sync.',
+      error: upstreamMsg
+        ? `Main API rejected the sync (HTTP ${upstream.status}): ${upstreamMsg}`
+        : `Main API rejected the sync (HTTP ${upstream.status}).`,
     };
   }
 
