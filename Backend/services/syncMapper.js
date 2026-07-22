@@ -236,10 +236,14 @@ export function mapProduct({
   }
   if (Object.keys(metaObj).length) mapped.scrape_meta = JSON.stringify(metaObj);
 
-  // Required-field gating (see REQUIRED_FIELDS): category + price.
+  // Required-field gating (see REQUIRED_FIELDS): category + price + image.
+  // The main API rejects any product with no image, and because creates are
+  // sent in grouped chunks, one image-less product fails its whole chunk — so
+  // gate them out here (marked non-syncable → skipped, never chunked).
   const missing = [];
   if (!mapped.product_category_ids) missing.push('category');
   if (!mapped.price_per_unit) missing.push('price');
+  if (!Array.isArray(images) || images.filter(Boolean).length === 0) missing.push('image');
 
   return {
     productId: product.id,
