@@ -42,24 +42,30 @@ export async function sendSyncableBatch({ siteType, syncable, country, seller })
     }
   }
 
-  // Creates — one batched POST for the whole group.
-  if (toCreate.length) {
-    const sent = await postGroupedListings({ siteType, results: toCreate, country: country || '', seller });
+  // Creates — the main API caps each grouped submission at 10 products
+  // (MAX_GROUPED_PRODUCTS), so split into chunks of ≤10; each chunk becomes one
+  // auction group. Keeps the synchronous submit path safe for any selection size
+  // (the background job pre-chunks, so this stays a no-op there).
+  const MAX_GROUPED_PER_CALL = 10;
+  for (let i = 0; i < toCreate.length; i += MAX_GROUPED_PER_CALL) {
+    const group = toCreate.slice(i, i + MAX_GROUPED_PER_CALL);
+    // eslint-disable-next-line no-await-in-loop
+    const sent = await postGroupedListings({ siteType, results: group, country: country || '', seller });
     if (!sent.ok) {
-      for (const r of toCreate) {
+      for (const r of group) {
         outcomes.push({ productId: r.productId, ok: false, mode: 'create', error: sent.error || `HTTP ${sent.status}` });
       }
-    } else {
-      for (const r of toCreate) {
-        const mid = sent.mainIdByProductId[r.productId];
-        const bid = sent.mainBatchByProductId[r.productId];
-        if (mid != null) {
-          outcomes.push({ productId: r.productId, ok: true, mainId: mid, batchId: bid, mode: 'create' });
-          mainIdByProductId[r.productId] = mid;
-          if (bid != null) batchByProductId[r.productId] = bid;
-        } else {
-          outcomes.push({ productId: r.productId, ok: false, mode: 'create', error: 'No main product id returned.' });
-        }
+      continue;
+    }
+    for (const r of group) {
+      const mid = sent.mainIdByProductId[r.productId];
+      const bid = sent.mainBatchByProductId[r.productId];
+      if (mid != null) {
+        outcomes.push({ productId: r.productId, ok: true, mainId: mid, batchId: bid, mode: 'create' });
+        mainIdByProductId[r.productId] = mid;
+        if (bid != null) batchByProductId[r.productId] = bid;
+      } else {
+        outcomes.push({ productId: r.productId, ok: false, mode: 'create', error: 'No main product id returned.' });
       }
     }
   }
