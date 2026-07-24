@@ -339,6 +339,9 @@ export interface SyncBatchInput {
   sellerName?: string;
   country: string;
   overrides?: Record<string, Record<string, unknown>>;
+  /** 'auto' = mark the seller auto-approved (listings go live immediately);
+   *  'admin' (default) = listings land pending for admin approval. */
+  approvalMode?: 'auto' | 'admin';
 }
 export interface SyncSubmitResponse {
   ok: boolean;
@@ -404,6 +407,9 @@ export interface SyncRunInput {
   overrides?: Record<string, Record<string, unknown>>;
   /** Explicit (admin-edited) id list; overrides filter resolution when present. */
   productIds?: number[];
+  /** 'auto' = mark the seller auto-approved (listings go live immediately);
+   *  'admin' (default) = listings land pending for admin approval. */
+  approvalMode?: 'auto' | 'admin';
 }
 
 export type SyncRunStatus = 'processing' | 'completed' | 'partial' | 'failed' | 'cancelled';

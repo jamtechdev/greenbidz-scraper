@@ -207,12 +207,25 @@ export function SyncPage() {
     return overrides;
   };
 
-  const onSubmit = () => {
-    submit.mutate({ productIds: readyIds, marketplace, sellerId: sellerId as number, sellerName, country, overrides: buildOverrides() });
+  // The Sync buttons open the approval modal first; the chosen mode ('auto' |
+  // 'admin') is threaded into the actual submit. 'inline' vs 'background'
+  // remembers which button was pressed.
+  const [approvalPrompt, setApprovalPrompt] = useState<null | 'inline' | 'background'>(null);
+
+  const runInline = (approvalMode: 'auto' | 'admin') => {
+    submit.mutate({
+      productIds: readyIds,
+      marketplace,
+      sellerId: sellerId as number,
+      sellerName,
+      country,
+      overrides: buildOverrides(),
+      approvalMode,
+    });
   };
 
   // Same payload, but as a tracked background run → land on the History tab.
-  const onSubmitBackground = () => {
+  const runBackground = (approvalMode: 'auto' | 'admin') => {
     startRun.mutate(
       {
         filters: {},
@@ -222,6 +235,7 @@ export function SyncPage() {
         sellerName,
         country,
         overrides: buildOverrides(),
+        approvalMode,
       },
       {
         onSuccess: (res) => {
@@ -231,6 +245,14 @@ export function SyncPage() {
         onError: (e) => toast.error((e as Error).message),
       },
     );
+  };
+
+  // User picked an approval option in the modal → run the pending submit.
+  const confirmApproval = (approvalMode: 'auto' | 'admin') => {
+    const which = approvalPrompt;
+    setApprovalPrompt(null);
+    if (which === 'inline') runInline(approvalMode);
+    else if (which === 'background') runBackground(approvalMode);
   };
 
   if (!productIds.length) {
@@ -502,7 +524,7 @@ export function SyncPage() {
                 variant="secondary"
                 icon={startRun.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <Clock className="h-4 w-4" />}
                 disabled={readyIds.length === 0 || startRun.isPending || submit.isPending}
-                onClick={onSubmitBackground}
+                onClick={() => setApprovalPrompt('background')}
                 title="Run as a tracked background job and go to History"
               >
                 {startRun.isPending ? 'Starting…' : 'Sync in background'}
@@ -510,7 +532,7 @@ export function SyncPage() {
               <Button
                 icon={submit.isPending ? <Loader2 className="h-4 w-4 animate-spin" /> : <UploadCloud className="h-4 w-4" />}
                 disabled={readyIds.length === 0 || submit.isPending || startRun.isPending}
-                onClick={onSubmit}
+                onClick={() => setApprovalPrompt('inline')}
               >
                 {submit.isPending ? 'Syncing…' : `Sync ${readyIds.length} product(s)`}
               </Button>
@@ -518,6 +540,47 @@ export function SyncPage() {
           )}
         </div>
       </div>
+
+      {/* Approval choice — shown before every sync (inline or background). */}
+      <Modal
+        open={approvalPrompt != null}
+        onClose={() => setApprovalPrompt(null)}
+        title="How should these listings be approved?"
+        footer={
+          <Button variant="ghost" size="sm" onClick={() => setApprovalPrompt(null)}>
+            Cancel
+          </Button>
+        }
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-muted">
+            Publishing <b className="text-ink">{readyIds.length}</b> listing(s) for{' '}
+            <b className="text-ink">{sellerName || `Seller #${sellerId}`}</b>.
+          </p>
+          <button
+            type="button"
+            onClick={() => confirmApproval('auto')}
+            className="w-full rounded-lg border border-line bg-panel2 p-3 text-left transition-colors hover:border-accent"
+          >
+            <div className="font-medium text-ink">Auto-approve this seller</div>
+            <div className="mt-0.5 text-xs text-muted">
+              Marks the seller as auto-approved on the main site. These — and all future — listings
+              go live for buyers immediately.
+            </div>
+          </button>
+          <button
+            type="button"
+            onClick={() => confirmApproval('admin')}
+            className="w-full rounded-lg border border-line bg-panel2 p-3 text-left transition-colors hover:border-accent"
+          >
+            <div className="font-medium text-ink">Send for admin approval</div>
+            <div className="mt-0.5 text-xs text-muted">
+              Listings are created as pending. An admin reviews and approves them before buyers can
+              see them.
+            </div>
+          </button>
+        </div>
+      </Modal>
 
       {/* "Add category to main DB" — placeholder (feature coming soon) */}
       <Modal

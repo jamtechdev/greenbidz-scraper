@@ -22,6 +22,7 @@ import {
 import { readAllProfiles } from '../utils/file-manager.js';
 import { mapProduct } from '../services/syncMapper.js';
 import { sendSyncableBatch } from '../services/syncDispatch.js';
+import { grantSellerAutoApproval } from '../services/syncSender.js';
 import {
   MARKETPLACES,
   SELLERS,
@@ -432,6 +433,18 @@ export async function submitSync(req, res) {
 
   const siteType = siteTypeFor(batch.marketplace);
   const start = Date.now();
+
+  // Approval choice from the sync modal: 'auto' marks the seller auto-approved
+  // on the main site FIRST, so the batches that follow are created as
+  // `approved` (buyer-visible). 'admin' (default) leaves them `pending`.
+  const approvalMode = req.body?.approvalMode === 'auto' ? 'auto' : 'admin';
+  if (approvalMode === 'auto') {
+    const grant = await grantSellerAutoApproval({ sellerId: batch.seller.id, siteType });
+    if (!grant.ok) {
+      return res.status(502).json({ error: `Could not auto-approve seller: ${grant.error}` });
+    }
+    logger.success(`Seller #${batch.seller.id} marked auto-approved for ${siteType}.`);
+  }
 
   // Record a durable run so this sync shows up in the History tab, exactly like
   // the background runner does (the only difference is this one runs inline).

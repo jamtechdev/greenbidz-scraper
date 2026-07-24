@@ -17,6 +17,62 @@ export function hasSystemKey() {
 }
 
 /**
+ * Mark a seller as auto-approved on the main site, so every batch created for
+ * them (this sync + future) is published as `approved` (buyer-visible) instead
+ * of `pending`. Lifetime + all-marketplaces grant (null dates / null site_ids).
+ * Idempotent on the main side (upserts the seller's grant row).
+ *
+ * @param {object} args
+ * @param {number} args.sellerId
+ * @param {string} args.siteType - x-platform value.
+ * @returns {Promise<{ ok: boolean, status?: number, data?: any, error?: string }>}
+ */
+export async function grantSellerAutoApproval({ sellerId, siteType }) {
+  const url = `${MAIN_API_BASE_URL}/api/v1/admin/seller-auto-approval-grant`;
+  const body = { seller_id: Number(sellerId), start_date: null, end_date: null, site_ids: null };
+  logger.info(`🔓 Granting auto-approval to seller #${sellerId} (${siteType})`);
+
+  let upstream;
+  try {
+    upstream = await fetch(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'x-system-key': MAIN_API_SYSTEM_KEY,
+        'x-platform': siteType,
+      },
+      body: JSON.stringify(body),
+    });
+  } catch (err) {
+    logger.error(`Seller auto-approval grant failed: ${err.message}`);
+    return { ok: false, status: 0, error: `Could not reach main API: ${err.message}` };
+  }
+
+  const text = await upstream.text();
+  let data;
+  try {
+    data = JSON.parse(text);
+  } catch {
+    data = { raw: text };
+  }
+
+  if (!upstream.ok || data?.success === false) {
+    const msg = data?.message || data?.error || (typeof data?.raw === 'string' ? data.raw : '');
+    logger.warn(`Seller auto-approval grant returned ${upstream.status}${msg ? `: ${msg}` : ''}`);
+    return {
+      ok: false,
+      status: upstream.status,
+      data,
+      error: msg
+        ? `Main API rejected the grant (HTTP ${upstream.status}): ${msg}`
+        : `Main API rejected the grant (HTTP ${upstream.status}).`,
+    };
+  }
+
+  return { ok: true, status: upstream.status, data };
+}
+
+/**
  * POST a set of mapped products to the main site's create-grouped-listings API.
  *
  * @param {object} args
@@ -182,4 +238,4 @@ export async function patchMainProduct({ mainProductId, mapped, siteType }) {
   return { ok: true, status: upstream.status, data };
 }
 
-export default { postGroupedListings, patchMainProduct, hasSystemKey };
+export default { postGroupedListings, patchMainProduct, hasSystemKey, grantSellerAutoApproval };

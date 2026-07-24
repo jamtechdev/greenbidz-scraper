@@ -18,7 +18,7 @@ import {
 import { readAllProfiles } from '../utils/file-manager.js';
 import { buildBatch } from './sync.controller.js';
 import { startSyncJob } from '../services/syncJob.js';
-import { hasSystemKey } from '../services/syncSender.js';
+import { hasSystemKey, grantSellerAutoApproval } from '../services/syncSender.js';
 import { getMarketplace, siteTypeFor } from '../config/sync-config.js';
 import { getJob, cancelJob } from '../web/jobs.js';
 import { logger } from '../utils/logger.js';
@@ -165,6 +165,17 @@ export async function postSyncRun(req, res) {
     ids = sel.ids;
   }
   if (!ids.length) return res.status(400).json({ error: 'No products match the selected filters.' });
+
+  // Approval choice from the sync modal: 'auto' marks the seller auto-approved
+  // on the main site before the run starts, so its batches publish as approved.
+  const approvalMode = req.body?.approvalMode === 'auto' ? 'auto' : 'admin';
+  if (approvalMode === 'auto') {
+    const grant = await grantSellerAutoApproval({ sellerId: Number(sellerId), siteType: siteTypeFor(marketplace) });
+    if (!grant.ok) {
+      return res.status(502).json({ error: `Could not auto-approve seller: ${grant.error}` });
+    }
+    logger.success(`Seller #${sellerId} marked auto-approved for ${siteTypeFor(marketplace)}.`);
+  }
 
   const run = await createSyncRun({
     site_type: siteTypeFor(marketplace),
